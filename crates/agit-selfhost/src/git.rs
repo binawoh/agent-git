@@ -143,9 +143,14 @@ pub fn initialize(state: &State, repo: &Repository) -> Result<()> {
     Ok(())
 }
 
-pub fn validate_snapshot(state: &State, repo: &Path, oid: &str) -> Result<meta::Meta> {
+fn validate_snapshot(
+    state: &State,
+    repo: &Path,
+    oid: &str,
+    verified_lfs: &mut HashSet<(String, u64)>,
+) -> Result<meta::Meta> {
     let snapshot = snapshot_meta(repo, oid)?;
-    validate_lfs(state, repo, oid)?;
+    validate_lfs(state, repo, oid, verified_lfs)?;
     if snapshot.is_file_line() {
         return Ok(snapshot);
     }
@@ -178,7 +183,12 @@ pub fn validate_snapshot(state: &State, repo: &Path, oid: &str) -> Result<meta::
     Ok(snapshot)
 }
 
-fn validate_lfs(state: &State, repo: &Path, oid: &str) -> Result<()> {
+fn validate_lfs(
+    state: &State,
+    repo: &Path,
+    oid: &str,
+    verified: &mut HashSet<(String, u64)>,
+) -> Result<()> {
     let repository = repo
         .file_stem()
         .and_then(|v| v.to_str())
@@ -206,10 +216,14 @@ fn validate_lfs(state: &State, repo: &Path, oid: &str) -> Result<()> {
             .output()?;
         ensure!(result.status.success(), "Cannot inspect LFS pointer");
         if let Some(pointer) = agit::domain::lfs::Pointer::parse(&result.stdout)? {
+            if verified.contains(&(pointer.oid.clone(), pointer.size)) {
+                continue;
+            }
             let file =
                 std::fs::File::open(state.root.join("lfs").join(repository).join(&pointer.oid))
                     .context("Upload the referenced LFS object before publishing Git history")?;
             pointer.verify(file)?;
+            verified.insert((pointer.oid, pointer.size));
         }
     }
     Ok(())
@@ -218,6 +232,7 @@ fn validate_lfs(state: &State, repo: &Path, oid: &str) -> Result<()> {
 /// Multi-ref publication must either update every ref or update none.
 pub fn validate_push_commands(input: &mut impl Read) -> Result<()> {
     let mut count = 0;
+    let mut shallow = 0;
     let mut atomic = false;
     loop {
         let mut prefix = [0u8; 4];
@@ -229,6 +244,15 @@ pub fn validate_push_commands(input: &mut impl Read) -> Result<()> {
         ensure!((4..=65520).contains(&length), "Invalid Git packet length");
         let mut packet = vec![0; length - 4];
         input.read_exact(&mut packet)?;
+        if packet.starts_with(b"shallow ") {
+            shallow += 1;
+            ensure!(count == 0 && shallow <= 1024, "Invalid shallow declaration");
+            ensure!(
+                meta::is_event_id(std::str::from_utf8(&packet[8..])?.trim_end()),
+                "Invalid shallow object id"
+            );
+            continue;
+        }
         count += 1;
         ensure!(count <= 1024, "Too many ref updates");
         if count == 1
@@ -265,19 +289,32 @@ pub fn validate_receive(state: &State, repo: &Path) -> Result<()> {
     ensure!(updates.len() <= 1024, "Too many ref updates");
     let zero = "0".repeat(40);
     let mut checked = HashSet::new();
+    let mut verified_lfs = HashSet::new();
     for change in &updates {
         let (old, new, name) = (&change[0], &change[1], &change[2]);
         ensure!(new != &zero, "Published refs cannot be deleted");
         ensure!(
-            name.starts_with("refs/heads/") || name.starts_with("refs/tags/agit-"),
+            name.starts_with("refs/heads/") || name.starts_with("refs/tags/"),
             "Unsupported ref namespace"
         );
-        let new_meta = validate_snapshot(state, repo, new)?;
+        let commit = output(
+            repo,
+            &["rev-parse", "--verify", &format!("{new}^{{commit}}")],
+        )?
+        .trim()
+        .to_owned();
+        let new_meta = if checked.insert(commit.clone()) {
+            validate_snapshot(state, repo, &commit, &mut verified_lfs)?
+        } else {
+            snapshot_meta(repo, &commit)?
+        };
         if name.starts_with("refs/tags/") {
-            ensure!(
-                name == &format!("refs/tags/agit-{new}"),
-                "Version tag must match its commit"
-            );
+            if name.starts_with("refs/tags/agit-") {
+                ensure!(
+                    name == &format!("refs/tags/agit-{commit}"),
+                    "Version tag must match its commit"
+                );
+            }
             ensure!(
                 old == &zero || old == new,
                 "Published version tags are immutable"
@@ -310,7 +347,7 @@ pub fn validate_receive(state: &State, repo: &Path) -> Result<()> {
         );
         for oid in new_commits.lines() {
             if checked.insert(oid.to_owned()) {
-                validate_snapshot(state, repo, oid)?;
+                validate_snapshot(state, repo, oid, &mut verified_lfs)?;
             }
         }
     }
@@ -350,5 +387,13 @@ mod tests {
         assert!(validate_push_commands(&mut commands(true, 2).as_slice()).is_ok());
         assert!(validate_push_commands(&mut commands(false, 2).as_slice()).is_err());
         assert!(validate_push_commands(&mut b"0008x".as_slice()).is_err());
+        let shallow = format!("shallow {}\n", "c".repeat(40));
+        let prefix = format!("{:04x}{shallow}", shallow.len() + 4).into_bytes();
+        let mut atomic = prefix.clone();
+        atomic.extend(commands(true, 2));
+        assert!(validate_push_commands(&mut atomic.as_slice()).is_ok());
+        let mut non_atomic = prefix;
+        non_atomic.extend(commands(false, 2));
+        assert!(validate_push_commands(&mut non_atomic.as_slice()).is_err());
     }
 }

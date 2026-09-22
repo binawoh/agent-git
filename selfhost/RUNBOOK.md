@@ -176,7 +176,11 @@ sudo journalctl -u agit-selfhost
 `reindex` rebuilds derived search tables from saved Git history and requires the
 service to be stopped. It preserves repository identities and credentials. Failed indexing preserves Git
 history and sets `incomplete=true` on searches until a successful indexing run.
-Search caps candidate scanning and reports truncation as incomplete. Unsupported
+An oversized event is indexed up to a bounded prefix and marks that snapshot
+incomplete; later events and other valid snapshots are still indexed. Original
+Git data is retained. Rebuild continues across failures and returns a failing
+exit code while any repository remains incomplete. Search caps candidate scanning
+and reports truncation as incomplete. Unsupported
 filters are rejected or exposed through the query's `unknown` field. The index
 deduplicates event bodies, but retains snapshot memberships, so disk usage is
 not identical to compressed Git history. No automatic eviction or disk quota is

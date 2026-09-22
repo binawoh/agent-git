@@ -84,9 +84,17 @@ fn run() -> Result<()> {
                         DELETE FROM snapshot_events; DELETE FROM snapshots; DELETE FROM saved_refs;
                         DELETE FROM event_search; DELETE FROM events; COMMIT;",
                     )?;
+                    let mut failed = false;
                     for repo in state.repositories()? {
-                        index::reindex(&mut state, &repo)?;
+                        if let Err(error) = index::reindex(&mut state, &repo) {
+                            failed = true;
+                            eprintln!("Repository {}/{}: {error:#}", repo.owner, repo.name);
+                        }
                     }
+                    anyhow::ensure!(
+                        !failed,
+                        "Rebuild completed with incomplete indexes; inspect the diagnostics"
+                    );
                     println!("Search index rebuilt");
                 }
                 Command::ValidateReceive => {

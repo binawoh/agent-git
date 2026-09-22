@@ -50,50 +50,52 @@ pub fn reindex(state: &mut State, repo: &Repository) -> Result<()> {
         history.lines().count() <= 100000,
         "History exceeds the indexing limit"
     );
+    let mut failed = false;
     for oid in history.lines() {
-        let exists: bool = state.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM snapshots WHERE repo_id=?1 AND oid=?2)",
-            params![repo.id, oid],
-            |r| r.get(0),
-        )?;
-        if exists {
-            continue;
-        }
-        let metadata = git::snapshot_meta(&path, oid)?;
-        if metadata.is_file_line() || metadata.session.is_empty() {
-            continue;
-        }
-        let (log, _) = storage::materialize_pair_bounded(
-            &path,
-            oid,
-            state.config.max_snapshot_mib * 1024 * 1024,
-        )?;
-        let raw = transcript::unwrap_strict(&log)?;
-        let session = agit::adapter::get(&metadata.runtime)?.parse(&raw)?;
-        let groups = turn::groups_of(&session);
-        let mut ordinals = HashMap::new();
-        for (index, events) in groups.iter().enumerate() {
-            for event in events {
-                ordinals.insert(*event, index + 1);
+        let result = (|| -> Result<()> {
+            let exists: bool = state.db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM snapshots WHERE repo_id=?1 AND oid=?2)",
+                params![repo.id, oid],
+                |r| r.get(0),
+            )?;
+            if exists {
+                return Ok(());
             }
-        }
-        let saved = git::output(&path, &["show", "-s", "--format=%ct%n%an%n%ae", oid])?;
-        let mut saved = saved.lines();
-        let saved_at: i64 = saved.next().context("Missing saved time")?.parse()?;
-        ensure!(
-            chrono::DateTime::from_timestamp(saved_at, 0).is_some(),
-            "Saved timestamp is outside the supported range"
-        );
-        let author = saved.next().unwrap_or("");
-        let email = saved.next().unwrap_or("");
-        let lines: Vec<_> = raw.lines().collect();
-        let origin = metadata
-            .cwd_state
-            .as_ref()
-            .and_then(|s| s.origin.as_deref());
-        let tx = state.db.transaction()?;
-        tx.execute(
-            "INSERT INTO snapshots VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            let metadata = git::snapshot_meta(&path, oid)?;
+            if metadata.is_file_line() || metadata.session.is_empty() {
+                return Ok(());
+            }
+            let (log, _) = storage::materialize_pair_bounded(
+                &path,
+                oid,
+                state.config.max_snapshot_mib * 1024 * 1024,
+            )?;
+            let raw = transcript::unwrap_strict(&log)?;
+            let session = transcript::display::parse(&log)?;
+            let groups = turn::groups_of(&session);
+            let mut ordinals = HashMap::new();
+            for (index, events) in groups.iter().enumerate() {
+                for event in events {
+                    ordinals.insert(*event, index + 1);
+                }
+            }
+            let saved = git::output(&path, &["show", "-s", "--format=%ct%n%an%n%ae", oid])?;
+            let mut saved = saved.lines();
+            let saved_at: i64 = saved.next().context("Missing saved time")?.parse()?;
+            ensure!(
+                chrono::DateTime::from_timestamp(saved_at, 0).is_some(),
+                "Saved timestamp is outside the supported range"
+            );
+            let author = saved.next().unwrap_or("");
+            let email = saved.next().unwrap_or("");
+            let lines: Vec<_> = raw.lines().collect();
+            let origin = metadata
+                .cwd_state
+                .as_ref()
+                .and_then(|s| s.origin.as_deref());
+            let tx = state.db.transaction()?;
+            tx.execute(
+            "INSERT INTO snapshots(repo_id,oid,session,runtime,saved,author,email,origin,turns) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             params![
                 repo.id,
                 oid,
@@ -106,57 +108,72 @@ pub fn reindex(state: &mut State, repo: &Repository) -> Result<()> {
                 groups.len()
             ],
         )?;
-        for (ordinal, event) in session.events.iter().enumerate() {
-            let Some(scope) = scope(event.kind) else {
-                continue;
-            };
-            let raw_line = event
-                .line
-                .and_then(|line| lines.get(line))
-                .copied()
-                .unwrap_or("");
-            let text = format!("{}\n{raw_line}", event.text.as_deref().unwrap_or(""));
-            ensure!(
-                text.len() <= 1024 * 1024,
-                "An indexed event exceeds the search limit; original Git history is retained"
-            );
-            let event_key = digest(serde_json::to_vec(&json!([
-                scope.as_str(),
-                text,
-                event.tool,
-                event.paths
-            ]))?);
-            let inserted = tx.execute(
-                "INSERT OR IGNORE INTO events VALUES (?1,?2,?3,?4,?5,?6,?7)",
-                params![
-                    event_key,
+            let mut complete = true;
+            for (ordinal, event) in session.events.iter().enumerate() {
+                let Some(scope) = scope(event.kind) else {
+                    continue;
+                };
+                let raw_line = event
+                    .line
+                    .and_then(|line| lines.get(line))
+                    .copied()
+                    .unwrap_or("");
+                let mut text = format!("{}\n{raw_line}", event.text.as_deref().unwrap_or(""));
+                let event_key = digest(serde_json::to_vec(&json!([
                     scope.as_str(),
                     text,
-                    text.to_lowercase(),
                     event.tool,
-                    serde_json::to_string(&event.paths)?,
-                    scope.is_secondhand()
-                ],
-            )?;
-            if inserted > 0 {
+                    event.paths
+                ]))?);
+                if text.len() > 1024 * 1024 {
+                    complete = false;
+                    let mut end = 1024 * 1024;
+                    while !text.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    text.truncate(end);
+                }
+                let inserted = tx.execute(
+                    "INSERT OR IGNORE INTO events VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                    params![
+                        event_key,
+                        scope.as_str(),
+                        text,
+                        text.to_lowercase(),
+                        event.tool,
+                        serde_json::to_string(&event.paths)?,
+                        scope.is_secondhand()
+                    ],
+                )?;
+                if inserted > 0 {
+                    tx.execute(
+                        "INSERT INTO event_search(id,text) VALUES (?1,?2)",
+                        params![event_key, text.to_lowercase()],
+                    )?;
+                }
                 tx.execute(
-                    "INSERT INTO event_search(id,text) VALUES (?1,?2)",
-                    params![event_key, text.to_lowercase()],
+                    "INSERT INTO snapshot_events VALUES (?1,?2,?3,?4,?5,?6)",
+                    params![
+                        repo.id,
+                        oid,
+                        ordinal,
+                        event_key,
+                        event.line.map(|n| n + 1).unwrap_or(0),
+                        ordinals.get(&ordinal).copied().unwrap_or(0)
+                    ],
                 )?;
             }
             tx.execute(
-                "INSERT INTO snapshot_events VALUES (?1,?2,?3,?4,?5,?6)",
-                params![
-                    repo.id,
-                    oid,
-                    ordinal,
-                    event_key,
-                    event.line.map(|n| n + 1).unwrap_or(0),
-                    ordinals.get(&ordinal).copied().unwrap_or(0)
-                ],
+                "UPDATE snapshots SET index_complete=?1 WHERE repo_id=?2 AND oid=?3",
+                params![complete, repo.id, oid],
             )?;
+            tx.commit()?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            failed = true;
+            eprintln!("Snapshot {} {oid} is not fully indexed: {error:#}", repo.id);
         }
-        tx.commit()?;
     }
     let tx = state.db.transaction()?;
     tx.execute("DELETE FROM saved_refs WHERE repo_id=?1", [&repo.id])?;
@@ -166,8 +183,20 @@ pub fn reindex(state: &mut State, repo: &Repository) -> Result<()> {
             params![repo.id, name, oid],
         )?;
     }
-    tx.execute("UPDATE repositories SET dirty=0 WHERE id=?1", [&repo.id])?;
+    let partial: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM snapshots WHERE repo_id=?1 AND index_complete=0)",
+        [&repo.id],
+        |row| row.get(0),
+    )?;
+    tx.execute(
+        "UPDATE repositories SET dirty=?1 WHERE id=?2",
+        params![failed || partial, repo.id],
+    )?;
     tx.commit()?;
+    ensure!(
+        !failed && !partial,
+        "Search index remains incomplete; valid history is searchable and original Git data is retained"
+    );
     Ok(())
 }
 
@@ -350,11 +379,10 @@ pub fn read_remote(
         .map(String::as_str)
         .unwrap_or("1")
         .parse()?;
-    let to: usize = params
-        .get("to")
-        .map(String::as_str)
-        .unwrap_or("11")
-        .parse()?;
+    let to: usize = match params.get("to") {
+        Some(value) => value.parse()?,
+        None => from.checked_add(10).context("Turn range overflow")?,
+    };
     ensure!(
         from > 0 && to > from && to - from <= 50,
         "Request between 1 and 50 turns, using an exclusive to bound"
@@ -371,10 +399,9 @@ pub fn read_remote(
         &oid,
         state.config.max_snapshot_mib * 1024 * 1024,
     )?;
-    let raw = transcript::unwrap_strict(&log)?;
-    let session = agit::adapter::get(&metadata.runtime)?.parse(&raw)?;
+    let session = transcript::display::parse(&log)?;
     let groups = turn::groups_of(&session);
-    let raw_lines: Vec<_> = raw.lines().collect();
+    let envelopes = storage::parse_envelopes(&log)?;
     let mut selected = Vec::new();
     let mut bytes = 0;
     let mut next = None;
@@ -391,7 +418,7 @@ pub fn read_remote(
     if let Some(first) = starts.first_mut() {
         *first = 0;
     }
-    starts.push(raw_lines.len());
+    starts.push(envelopes.len());
     ensure!(
         starts.windows(2).all(|pair| pair[0] <= pair[1]),
         "Turn source lines are not ordered"
@@ -399,7 +426,8 @@ pub fn read_remote(
     for index in (from - 1..groups.len()).take(to - from) {
         let events = (starts[index]..starts[index + 1])
             .map(|line| {
-                Ok(json!({"line":line+1,"content":serde_json::from_str::<Value>(raw_lines[line])?}))
+                let envelope=&envelopes[line];
+                Ok(json!({"line":line+1,"source":envelope.source,"source_session_id":envelope.session_id,"content":envelope.content}))
             })
             .collect::<Result<Vec<_>>>()?;
         let item = json!({"turn":index+1,"events":events});

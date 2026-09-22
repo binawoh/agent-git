@@ -123,7 +123,7 @@ impl State {
             schema: 1,
             owner,
             account_id: Uuid::new_v4().to_string(),
-            public_url: public_url.trim_end_matches('/').to_owned(),
+            public_url: url.as_str().trim_end_matches('/').to_owned(),
             max_snapshot_mib,
             max_upload_mib,
         };
@@ -153,6 +153,13 @@ impl State {
             CREATE TABLE IF NOT EXISTS snapshot_events(repo_id TEXT NOT NULL, oid TEXT NOT NULL, ordinal INTEGER NOT NULL, event_id TEXT NOT NULL REFERENCES events(id), line INTEGER NOT NULL, turn INTEGER NOT NULL, PRIMARY KEY(repo_id,oid,ordinal));
             CREATE INDEX IF NOT EXISTS event_membership ON snapshot_events(event_id);
             CREATE VIRTUAL TABLE IF NOT EXISTS event_search USING fts5(id UNINDEXED, text, tokenize='trigram');")?;
+        let has_completeness: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('snapshots') WHERE name='index_complete')", [], |row|row.get(0))?;
+        if !has_completeness {
+            db.execute_batch(
+                "ALTER TABLE snapshots ADD COLUMN index_complete INTEGER NOT NULL DEFAULT 1",
+            )?;
+        }
         Ok(Self { root, config, db })
     }
 

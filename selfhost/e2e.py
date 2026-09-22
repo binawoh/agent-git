@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from urllib.error import HTTPError
@@ -133,6 +134,7 @@ def main():
         source = root / "client" / "repos" / "tester" / "demo"
         for saved in run(["git", "rev-list", "--all"], cwd=source).stdout.splitlines():
             run(["git", "tag", f"agit-{saved}", saved], cwd=source)
+        run(["git", "tag", "-a", "fixture-milestone", "-m", "Synthetic milestone", "codex"], cwd=source)
         cli("push", "tester/demo", "--all", "--private")
         repo = api("/api/agents/tester/demo")
         identity = {"X-AgentGit-Expected-Agent-Id": repo["agent_id"]}
@@ -148,6 +150,8 @@ def main():
         hit = search["items"][0]
         transcript = api(hit["url"][len(hub):])
         assert transcript["commit"] == hit["commit"] and "缓存" in json.dumps(transcript, ensure_ascii=False)
+        continued = api(f"/api/agents/tester/demo/sessions/{hit['session_id']}?ref={hit['commit']}&from=11")
+        assert not continued["turns"] and continued["to"] == 21
         cold = dict(env, AGIT_HOME=str(root / "cold"), CODEX_HOME=str(root / "no-native"),
                     CLAUDE_CONFIG_DIR=str(root / "no-claude"))
         run([agit, "login", "--hub", hub, "--with-token", "--json"], pat + "\n", environment=cold)
@@ -198,8 +202,8 @@ def main():
             expected = run(["git", "rev-parse", reference], cwd=source).stdout.strip()
             actual = run(["git", "rev-parse", reference.replace("refs/heads/", "refs/remotes/origin/")], cwd=restored).stdout.strip()
             assert expected == actual
-        tags = run(["git", "tag", "--list", "agit-*"], cwd=source).stdout
-        assert tags.strip() and tags == run(["git", "tag", "--list", "agit-*"], cwd=restored).stdout
+        tags = run(["git", "for-each-ref", "--format=%(refname) %(objectname)", "refs/tags"], cwd=source).stdout
+        assert "fixture-milestone" in tags and tags == run(["git", "for-each-ref", "--format=%(refname) %(objectname)", "refs/tags"], cwd=restored).stdout
         passed("Cold clone preserves branch commits, version tags and Git LFS bytes")
         before_refs = api("/api/agents/tester/demo/refs")
         git_env = dict(env, GIT_CONFIG_COUNT="3", GIT_CONFIG_KEY_0="http.extraHeader",
@@ -207,7 +211,7 @@ def main():
                        GIT_CONFIG_KEY_1="http.extraHeader",
                        GIT_CONFIG_VALUE_1=f"X-AgentGit-Expected-Agent-Id: {repo['agent_id']}",
                        GIT_CONFIG_KEY_2="core.hooksPath", GIT_CONFIG_VALUE_2=str(root / "empty-hooks"))
-        refs = ["main:refs/heads/transaction-probe", "main:refs/tags/invalid"]
+        refs = ["main:refs/heads/transaction-probe", "main:refs/tags/agit-" + "b" * 40]
         for flags in ([], ["--atomic"]):
             rejected = run(["git", "push", *flags, "origin", *refs], environment=git_env, cwd=source, success=False)
             assert rejected.returncode != 0
@@ -223,10 +227,69 @@ def main():
         assert rejected.returncode != 0 and "LFS" in rejected.stderr
         assert api("/api/agents/tester/demo/refs") == before_refs
         passed("Rejected multi-ref updates and missing LFS objects leave refs unchanged")
+        metadata = json.loads(run(["git", "show", "codex:session/meta.json"], cwd=source).stdout)
+        record = {"type": "assistant", "uuid": str(uuid.uuid4()), "sessionId": str(uuid.uuid4()),
+                  "message": {"role": "assistant", "content": [{"type": "text", "text": "mixed-runtime-marker"}]}}
+        content = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        content_id = hashlib.sha256(content.encode()).hexdigest()[:40]
+        envelope = '{"_source":"claude-code","_session_id":"' + metadata["session"] + '\",\"_object_hash\":\"' + content_id + '\",\"content\":' + content + '}\n'
+        event_id = hashlib.sha256(envelope.encode()).hexdigest()[:40]
+        event_path = "events/" + "/".join(event_id[:4]) + "/" + event_id
+        run(["git", "read-tree", "codex"], environment=index_env, cwd=source)
+        changes = {event_path: envelope}
+        for name in ("LOG", "VIEW"):
+            changes[name] = run(["git", "show", f"codex:{name}"], cwd=source).stdout + event_id + "\n"
+        for path, contents in changes.items():
+            blob = run(["git", "hash-object", "-w", "--stdin"], contents, cwd=source).stdout.strip()
+            run(["git", "update-index", "--add", "--cacheinfo", f"100644,{blob},{path}"], environment=index_env, cwd=source)
+        tree = run(["git", "write-tree"], environment=index_env, cwd=source).stdout.strip()
+        mixed = run(["git", "commit-tree", tree, "-p", "codex"], "Mixed runtime fixture\n", cwd=source).stdout.strip()
+        run(["git", "push", "--atomic", "origin", f"{mixed}:refs/heads/codex"], environment=git_env, cwd=source)
+        mixed_search = api("/api/search/sessions?q=mixed-runtime-marker")
+        assert mixed_search["total"] == 1 and not mixed_search["incomplete"], mixed_search
+        mixed_read = api(mixed_search["items"][0]["url"][len(hub):])
+        assert any(event["source"] == "claude-code" and "mixed-runtime-marker" in json.dumps(event)
+                   for turn in mixed_read["turns"] for event in turn["events"])
+        passed("Mixed-runtime snapshots preserve searchable content and source provenance")
+        collected_id = str(uuid.uuid4())
+        collected_path = root / "codex" / "archived_sessions" / f"rollout-2026-09-22T00-00-01-{collected_id}.jsonl"
+        collected_path.write_text("".join(json.dumps(row) + "\n" for row in [
+            {"type": "session_meta", "payload": {"id": collected_id, "cwd": str(project), "timestamp": "2026-09-22T00:00:01Z"}},
+            {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Collector fixture"}]}},
+            {"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Collector answer"}]}}
+        ]), encoding="utf-8")
+        original = collected_path.read_bytes()
+        collect = [sys.executable, "-X", "utf8", Path(__file__).with_name("collect.py").resolve(), "--agit", agit,
+                   "--repo", "tester/collected", "--codex-home", root / "codex", "--claude-home", root / "claude",
+                   "--session", collected_id, "--apply", "--push"]
+        run(collect)
+        collected_refs = api("/api/agents/tester/collected/refs")
+        run(collect)
+        assert api("/api/agents/tester/collected/refs") == collected_refs
+        assert collected_path.read_bytes() == original
+        passed("Collector publishes archived IDs and repeats without rewriting history or native files")
+        busy = run([server, "--data", root / "data", "reindex"], success=False)
+        assert busy.returncode != 0 and "Stop the running Hub" in busy.stderr
         process.terminate()
         process.wait(timeout=10)
         run([server, "--data", root / "data", "reindex"])
         process = start()
+        with collected_path.open("a", encoding="utf-8") as stream:
+            for role, text in [("user", "Large answer fixture"), ("assistant", "large " * 200000),
+                               ("user", "Subsequent valid question"), ("assistant", "after-limit-marker")]:
+                stream.write(json.dumps({"type": "response_item", "payload": {"type": "message", "role": role,
+                    "content": [{"type": "input_text" if role == "user" else "output_text", "text": text}]}}) + "\n")
+        run(collect)
+        partial = api("/api/search/sessions?q=after-limit-marker")
+        assert partial["total"] == 1 and partial["incomplete"], partial
+        process.terminate()
+        process.wait(timeout=10)
+        rebuilt = run([server, "--data", root / "data", "reindex"], success=False)
+        assert rebuilt.returncode != 0 and "incomplete indexes" in rebuilt.stderr
+        process = start()
+        partial = api("/api/search/sessions?q=after-limit-marker")
+        assert partial["total"] == 1 and partial["incomplete"], partial
+        passed("Oversized events preserve later search hits and honest incompleteness through rebuild")
         assert api("/api/search/sessions?" + urlencode({"q": "缓存"}))["total"] == 2
         rotated = api("/api/auth/refresh", "POST", {"refresh_token": login["refresh_token"]}, authenticated=False)
         api("/api/auth/refresh", "POST", {"refresh_token": login["refresh_token"]}, status=401, authenticated=False)
