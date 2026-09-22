@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import tomllib
 
@@ -67,6 +68,14 @@ def main():
         reports = json.loads(result.stdout.decode("utf-8"))
         report = reports[0] if isinstance(reports, list) else reports[args.name]
         tarball = output / report["filename"]
+        with tempfile.TemporaryDirectory(prefix="pack-mode-", dir=output) as mode_directory:
+            normalized = Path(mode_directory) / tarball.name
+            with tarfile.open(tarball, "r:gz") as source, tarfile.open(normalized, "w:gz") as target:
+                for member in source.getmembers():
+                    if member.name == "package/bin/agit-selfhost":
+                        member.mode = 0o755
+                    target.addfile(member, source.extractfile(member) if member.isfile() else None)
+            normalized.replace(tarball)
         checksum = hashlib.sha256(tarball.read_bytes()).hexdigest()
         tarball.with_suffix(tarball.suffix + ".sha256").write_text(f"{checksum}  {tarball.name}\n", "utf-8")
         print(json.dumps({"tarball": str(tarball), "sha256": checksum,
