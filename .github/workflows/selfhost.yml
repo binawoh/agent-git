@@ -15,7 +15,12 @@ jobs:
       - run: cargo build --locked --bin agit
       - run: cargo build --locked --release -p agit-selfhost
       - run: cargo test --locked -p agit-selfhost
-      - run: python3 selfhost/e2e.py --agit target/debug/agit --server target/release/agit-selfhost --output selfhost/artifacts/e2e-linux.json
+      - name: Pack and install the Hub through npm
+        run: |
+          python3 selfhost/npm/pack.py --binary target/release/agit-selfhost --name agit-selfhost-local --source-commit "$GITHUB_SHA" --output selfhost/artifacts/npm
+          npm install --global --prefix "$RUNNER_TEMP/agit-selfhost-npm" --ignore-scripts --no-audit --no-fund --offline ./selfhost/artifacts/npm/*.tgz
+          "$RUNNER_TEMP/agit-selfhost-npm/bin/agit-selfhost" --help
+      - run: python3 selfhost/e2e.py --agit target/debug/agit --server "$RUNNER_TEMP/agit-selfhost-npm/bin/agit-selfhost" --output selfhost/artifacts/e2e-linux.json
       - run: sha256sum target/release/agit-selfhost > selfhost/artifacts/SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
@@ -23,6 +28,10 @@ jobs:
           path: |
             target/release/agit-selfhost
             selfhost/artifacts/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agit-selfhost-npm-local
+          path: selfhost/artifacts/npm/
       - uses: actions/upload-artifact@v4
         if: always()
         with:

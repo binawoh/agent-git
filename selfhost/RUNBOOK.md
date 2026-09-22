@@ -42,6 +42,10 @@ SHA-256 checksum. This artifact is for x86-64 Linux, not an ARM VPS.
 
 ## Ubuntu deployment
 
+An optional [npm package](npm/README.md) distributes the same native server.
+Installing a local tarball does not require an npm account. The VPS still hosts
+the running service and data; package publication is only a distribution step.
+
 Inspect the actual VPS OS, architecture, free disk, memory, installed services,
 firewall and domain before applying these examples. They assume a Linux host
 using systemd and an HTTPS domain routed to that host. The HTTP service binds to
