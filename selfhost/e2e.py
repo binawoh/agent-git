@@ -51,9 +51,11 @@ def main():
     report = {"work_dir": str(root), "steps": results, "status": "failed"}
 
     def run(command, stdin=None, environment=None, cwd=project, success=True):
-        result = subprocess.run([str(v) for v in command], input=stdin, text=True,
-                                encoding="utf-8", capture_output=True, cwd=cwd,
+        result = subprocess.run([str(v) for v in command], input=stdin.encode("utf-8") if isinstance(stdin, str) else stdin,
+                                capture_output=True, cwd=cwd,
                                 env=environment or env, timeout=120)
+        result.stdout = result.stdout.decode("utf-8", errors="replace")
+        result.stderr = result.stderr.decode("utf-8", errors="replace")
         if success and result.returncode:
             raise AssertionError(f"Command failed: {command}\n{result.stdout}\n{result.stderr}")
         return result
