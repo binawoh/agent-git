@@ -1,5 +1,10 @@
 # agit
 
+This fork's headless, single-user Hub work lives on the `selfhost` branch.
+See [the investigation and contract probe](selfhost/README.md).
+The self-hosted backend is not implemented yet. Fork changes stay in this
+repository; no upstream pull request is planned.
+
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange?logo=rust&logoColor=white)](https://www.rust-lang.org)
 
