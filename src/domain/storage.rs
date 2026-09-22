@@ -930,6 +930,37 @@ pub fn materialize_pair_at(repo_root: &Path, git_ref: &str) -> Result<(String, S
     )
 }
 
+/// A Hub reads immutable local objects under an explicit memory budget, without fetching.
+pub fn materialize_pair_bounded(
+    repo_root: &Path,
+    commit: &str,
+    maximum: usize,
+) -> Result<(String, String)> {
+    anyhow::ensure!(
+        meta::is_event_id(commit),
+        "bounded snapshots require an immutable SHA-1 commit"
+    );
+    anyhow::ensure!(
+        maximum > 0 && maximum <= MAX_MATERIALIZED_BYTES,
+        "invalid snapshot memory budget"
+    );
+    materialize_pair_with_policy(repo_root, commit, maximum, maximum, ReadPolicy::LocalOnly)
+}
+
+/// A trusted receive hook retains Git's object quarantine while forbidding network reads.
+pub fn materialize_quarantined_pair_bounded(
+    repo_root: &Path,
+    commit: &str,
+    maximum: usize,
+) -> Result<(String, String)> {
+    anyhow::ensure!(meta::is_event_id(commit), "Expected an immutable commit");
+    anyhow::ensure!(
+        maximum > 0 && maximum <= MAX_MATERIALIZED_BYTES,
+        "Invalid materialization limit"
+    );
+    materialize_pair_with_policy(repo_root, commit, maximum, maximum, ReadPolicy::Quarantine)
+}
+
 fn materialize_pair_at_with_limits(
     repo_root: &Path,
     git_ref: &str,

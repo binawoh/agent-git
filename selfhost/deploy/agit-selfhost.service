@@ -1,0 +1,26 @@
+[Unit]
+Description=Private AgentGit Hub
+After=network.target
+
+[Service]
+User=agit-hub
+Group=agit-hub
+UMask=0077
+WorkingDirectory=/var/lib/agit-selfhost
+ExecStart=/usr/local/bin/agit-selfhost --data /var/lib/agit-selfhost serve --listen 127.0.0.1:8177
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/agit-selfhost
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryMax=768M
+TasksMax=64
+LimitNOFILE=1024
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -675,6 +675,9 @@ pub fn push_for_remote(
         "secret acceptance requires a Git push"
     );
     super::identity::verify_transport_target(repo, identity)?;
+    let mut atomic_args = args.to_vec();
+    atomic_args.insert(1, "--atomic");
+    let args = atomic_args.as_slice();
     let mut transport = TransportIdentity::new(Some(repo.root()), args, identity)?;
     transport.accept_secret_findings = accept_secret_findings;
     run_transport(Some(repo.root()), args, &transport)

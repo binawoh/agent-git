@@ -200,7 +200,10 @@ pub(crate) fn validate_path(path: &Path, directory: bool, private: bool) -> io::
             &expected,
             final_component && private,
             !final_component,
-        )?;
+        )
+        .map_err(|error| {
+            io::Error::new(error.kind(), format!("{}: {error}", component.display()))
+        })?;
         // Retained ancestor handles prevent path substitution while descendant checks run.
         held.push(file);
     }
@@ -254,7 +257,8 @@ fn validate_acl(handle: HANDLE, expected: &str, private: bool, ancestor: bool) -
         }
         let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
         let sid = sid_string(std::ptr::addr_of!(allowed.SidStart).cast_mut().cast())?;
-        if sid == expected || trusted_system_sid(&sid) {
+        // OWNER RIGHTS represents this object's already-validated owner, not another user.
+        if sid == expected || trusted_system_sid(&sid) || sid == "S-1-3-4" {
             continue;
         }
         // Public read access to the store does not grant authority over private state.
@@ -439,6 +443,30 @@ pub(crate) fn private_directory(path: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
     use std::io::Read;
+
+    #[test]
+    fn owner_rights_is_private_but_an_additional_reader_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("owner-rights-key");
+        std::fs::write(&path, b"synthetic fixture").unwrap();
+        let set = |rule: &str| {
+            let result = std::process::Command::new("icacls")
+                .arg(&path)
+                .args(["/inheritance:r", "/grant:r", rule])
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        };
+        set("*S-1-3-4:F");
+        let file = std::fs::File::open(&path).unwrap();
+        validate_acl(file.as_raw_handle(), &current_sid().unwrap(), true, false).unwrap();
+        set("*S-1-1-0:R");
+        assert!(validate_acl(file.as_raw_handle(), &current_sid().unwrap(), true, false).is_err());
+    }
 
     #[test]
     fn private_file_creation_excludes_inherited_readers_and_never_overwrites() {

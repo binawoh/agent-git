@@ -97,11 +97,12 @@ def main():
     parser.add_argument("--agit", type=Path, required=True, help="Client binary to execute")
     parser.add_argument("--system-git", action="store_true", help="Use installed Git; keep credential protection")
     parser.add_argument("--output", type=Path, help="Write a local JSON report")
+    parser.add_argument("--state-parent", type=Path, help="Trusted existing parent for isolated client state")
     args = parser.parse_args()
     executable = args.agit.expanduser().resolve(strict=True)
     if not executable.is_file():
         parser.error("--agit must name a file")
-    work = Path(tempfile.mkdtemp(prefix="agit-headless-probe-"))
+    work = Path(tempfile.mkdtemp(prefix="agit-headless-probe-", dir=args.state_parent))
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.requests = []
     server.acknowledge = True

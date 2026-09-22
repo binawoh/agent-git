@@ -1,0 +1,19 @@
+# Replace history.example.com and the certificate paths with your own values.
+server {
+    listen 443 ssl;
+    server_name history.example.com;
+    ssl_certificate /etc/letsencrypt/live/history.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/history.example.com/privkey.pem;
+    client_max_body_size 256m;
+    client_body_timeout 60s;
+    send_timeout 60s;
+    location / {
+        proxy_pass http://127.0.0.1:8177;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_request_buffering on;
+        proxy_buffering off;
+    }
+}

@@ -688,6 +688,7 @@ pub fn runtime(value: &str) {
 }
 
 pub const MCP_TOOLS: &[&str] = &[
+    "read_remote",
     "search",
     "show",
     "view",

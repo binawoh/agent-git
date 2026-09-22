@@ -59,6 +59,7 @@ fn handle(req: &serde_json::Value) -> Option<String> {
                 "tools": [
                     {"name": "search", "description": "Search readable AgentGit history. Use query for one search, or queries for an ordered batch (up to 16, four in flight). Shared filters: repo (owner/name), owner, author (saved Git author name/email), since (inclusive UTC saved time), before (exclusive UTC saved time), runtime, scopes (prompt/reply/tool/output/edit/summary), tool, path. Queries also accept quoted phrases, -exclude and qualifiers such as turns:>20. Inspect incomplete and unknown before concluding no work exists. Scope identifies the evidence; secondhand means a compact summary. Outcome/confidence are heuristics: open a hit before relying on it. Pagination includes page, per and has_more. scope restricts sessions or agents to mine (personally owned repositories), org (readable repositories in current membership organizations), public, or one owner/repo; every remote search requires login. local=true searches saved local session history without HTTP or native transcript access; it keeps the login precondition and refuses scope, here and unsupported Hub-only filters/types before scanning.", "inputSchema": {"type":"object","properties":{"local":{"type":"boolean"},"query":{"type":"string"},"queries":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":16},"type":{"type":"string","enum":["sessions","agents","prs","people"]},"sort":{"type":"string","enum":["best","recent","turns"]},"limit":{"type":"integer","minimum":1,"maximum":100},"page":{"type":"integer","minimum":1},"scope":{"type":"string","description":"mine, org, public, or owner/repo; sessions and agents only"},"here":{"type":"boolean","description":"Restrict sessions to the current code Git repository exact origin; requires a supporting Hub."},"repo":{"type":"string"},"owner":{"type":"string"},"author":{"type":"string"},"since":{"type":"string"},"before":{"type":"string"},"runtime":{"type":"string"},"scopes":{"type":"array","items":{"type":"string","enum":["prompt","reply","tool","output","edit","summary"]}},"tool":{"type":"string"},"path":{"type":"string"}},"additionalProperties":false}},
                     {"name": "show", "description": "Read part of a session (ref, ref#n, ref#n.k)", "inputSchema": {"type":"object","properties":{"ref":{"type":"string"}}}},
+                    {"name": "read_remote", "description": "Read saved session turns from a compatible private Hub without cloning. Use repo and session_id from a search hit, and the immutable commit in its URL's ref parameter as reference. from is 1-based; follow next_from using the returned commit to continue the same snapshot.", "inputSchema": {"type":"object","properties":{"repo":{"type":"string"},"session_id":{"type":"string"},"reference":{"type":"string"},"from":{"type":"integer","minimum":1,"maximum":1000000}},"required":["repo","session_id","reference"],"additionalProperties":false}},
                     {"name": "view", "description": "the ordered composition of a VIEW (plumbing)", "inputSchema": {"type":"object","properties":{"ref":{"type":"string"}}}},
                     {"name": "status", "description": "who am I + sync status", "inputSchema": {"type":"object","properties":{}}},
                     {"name": "commit", "description": "settle the current session", "inputSchema": {"type":"object","properties":{"milestone":{"type":"string"}}}},
@@ -180,6 +181,15 @@ fn search_arguments(args: &serde_json::Value) -> Result<Vec<String>, String> {
 
 /// Subprocess stdin must be closed so a CLI prompt cannot consume the MCP request stream.
 fn call_tool(name: &str, args: &serde_json::Value) -> ToolOutput {
+    if name == "read_remote" {
+        return match remote_read(args) {
+            Ok(value) => ToolOutput {
+                text: value.to_string(),
+                is_error: false,
+            },
+            Err(error) => ToolOutput::error(format!("cannot read remote history: {error:#}")),
+        };
+    }
     let exe = std::env::current_exe().unwrap_or_else(|_| "agit".into());
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("--no-color").stdin(std::process::Stdio::null());
@@ -253,6 +263,38 @@ fn call_tool(name: &str, args: &serde_json::Value) -> ToolOutput {
         }
         Err(e) => ToolOutput::error(format!("could not run the tool: {e}")),
     }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RemoteReadArgs {
+    repo: String,
+    session_id: String,
+    reference: String,
+    #[serde(default = "first_turn")]
+    from: usize,
+}
+
+fn first_turn() -> usize {
+    1
+}
+
+fn remote_read(args: &serde_json::Value) -> crate::Result<serde_json::Value> {
+    let args: RemoteReadArgs = serde_json::from_value(args.clone())?;
+    let (owner, name) = super::parse_slug(&args.repo)?;
+    anyhow::ensure!(
+        (1..=1_000_000).contains(&args.from),
+        "from is outside the supported turn range"
+    );
+    anyhow::ensure!(
+        crate::domain::meta::is_event_id(&args.reference),
+        "reference must be an immutable commit from the search result URL"
+    );
+    let request = serde_json::from_value(serde_json::json!({
+        "operation":"transcript", "owner":owner, "name":name,
+        "session":args.session_id,"reference":args.reference,"from":args.from,
+    }))?;
+    super::require_login()?.catalog_read(request)
 }
 
 /// The VIEW tool returns its structured value directly; the CLI envelope is transport.

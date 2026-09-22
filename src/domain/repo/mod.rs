@@ -222,6 +222,8 @@ impl std::error::Error for GitWorktreeFormatUnavailable {}
 pub(crate) enum ReadPolicy {
     AllowTransport,
     LocalOnly,
+    /// Server hooks read Git's unpublished quarantine without permitting transport.
+    Quarantine,
     /// The selected checkout owns its Git carrier; ancestor discovery is forbidden.
     #[cfg(feature = "cli")]
     LocalRepository(crate::infra::local_git::Deadline),
@@ -260,6 +262,14 @@ impl ReadPolicy {
                 "GIT_REPLACE_REF_BASE",
                 "GIT_SHALLOW_FILE",
             ] {
+                if matches!(self, Self::Quarantine)
+                    && matches!(
+                        key,
+                        "GIT_OBJECT_DIRECTORY" | "GIT_ALTERNATE_OBJECT_DIRECTORIES"
+                    )
+                {
+                    continue;
+                }
                 command.env_remove(key);
             }
         }

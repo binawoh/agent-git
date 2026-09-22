@@ -426,10 +426,16 @@ fn lineage_snapshot(
 /// Inspection reads a unique rollout directly; opening a native index may create WAL sidecars.
 #[cfg(feature = "cli")]
 pub(crate) fn resolve_readonly(session_id: &str) -> Result<PathBuf> {
-    super::unique_native_file(&sessions_root()?, usize::MAX, |path| {
-        path.extension().and_then(|value| value.to_str()) == Some("jsonl")
-            && id_from_filename(path).as_deref() == Some(session_id)
-    })
+    let home = codex_home()?;
+    let roots = [home.join("sessions"), home.join("archived_sessions")];
+    super::unique_native_files(
+        roots.iter().filter(|p| p.exists()).map(PathBuf::as_path),
+        usize::MAX,
+        |path| {
+            path.extension().and_then(|value| value.to_str()) == Some("jsonl")
+                && id_from_filename(path).as_deref() == Some(session_id)
+        },
+    )
 }
 
 /// One row of the index database → `SessionRef`.
@@ -623,10 +629,13 @@ impl Adapter for Codex {
         }
         // Last resort: the filename has the form `rollout-<ISO>-<uuid>.jsonl`, with the id
         // embedded in it.
-        let root = sessions_root().ok()?;
-        all_rollouts(&root)
+        let home = codex_home().ok()?;
+        let mut matches = [home.join("sessions"), home.join("archived_sessions")]
             .into_iter()
-            .find(|p| id_from_filename(p).as_deref() == Some(session_id))
+            .flat_map(|root| all_rollouts(&root))
+            .filter(|p| id_from_filename(p).as_deref() == Some(session_id));
+        let found = matches.next()?;
+        matches.next().is_none().then_some(found)
     }
 
     fn snapshot_native_readonly(

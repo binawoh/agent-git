@@ -64,8 +64,20 @@ fn unique_native_file(
     max_depth: usize,
     matches: impl Fn(&Path) -> bool,
 ) -> Result<PathBuf> {
+    unique_native_files([root], max_depth, matches)
+}
+
+#[cfg(feature = "cli")]
+fn unique_native_files<'a>(
+    roots: impl IntoIterator<Item = &'a Path>,
+    max_depth: usize,
+    matches: impl Fn(&Path) -> bool,
+) -> Result<PathBuf> {
     let mut found = None;
-    for entry in walkdir::WalkDir::new(root).max_depth(max_depth) {
+    for entry in roots
+        .into_iter()
+        .flat_map(|root| walkdir::WalkDir::new(root).max_depth(max_depth))
+    {
         let entry =
             entry.map_err(|_| anyhow::anyhow!("the native transcript inventory cannot be read"))?;
         anyhow::ensure!(

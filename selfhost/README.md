@@ -1,8 +1,10 @@
 # Headless private Hub investigation
 
-Status: investigation and a synthetic client contract probe only. No backend has
-been implemented or deployed. Changes belong to this fork's `selfhost` branch;
-upstream is a source of updates, not a push or pull-request destination.
+This document records the baseline investigation. The implementation and current
+operating instructions are in [RUNBOOK.md](RUNBOOK.md). Claims below about missing
+components describe the unmodified upstream baseline, not the fork's current status.
+Changes belong to this fork's `selfhost` branch; upstream is a source of updates,
+not a push or pull-request destination.
 
 The compatibility baseline is upstream `agit-v0.2.3`, commit
 `222d3c3d2250e0771bcccf0aa77dab6aa4d8b832`. The fork's `main` branch may contain

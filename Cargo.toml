@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/agit-tunnel", "crates/agit-controller", "crates/agit-peer"]
+members = [".", "crates/agit-tunnel", "crates/agit-controller", "crates/agit-peer", "crates/agit-selfhost"]
 default-members = ["."]
 resolver = "3"
 
