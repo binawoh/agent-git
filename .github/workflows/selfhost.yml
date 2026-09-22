@@ -13,9 +13,16 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y git-lfs
       - run: cargo build --locked --bin agit
-      - run: cargo build --locked -p agit-selfhost
+      - run: cargo build --locked --release -p agit-selfhost
       - run: cargo test --locked -p agit-selfhost
-      - run: python3 selfhost/e2e.py --agit target/debug/agit --server target/debug/agit-selfhost --output selfhost/artifacts/e2e-linux.json
+      - run: python3 selfhost/e2e.py --agit target/debug/agit --server target/release/agit-selfhost --output selfhost/artifacts/e2e-linux.json
+      - run: sha256sum target/release/agit-selfhost > selfhost/artifacts/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agit-selfhost-linux-x86_64
+          path: |
+            target/release/agit-selfhost
+            selfhost/artifacts/SHA256SUMS
       - uses: actions/upload-artifact@v4
         if: always()
         with:

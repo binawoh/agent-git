@@ -121,6 +121,7 @@ def main():
                          "timestamp": "2026-09-22T00:00:00Z", "message": {"role": role,
                          "content": [{"type": "text", "text": text}]}}
                         for role, text in [("user", "缓存 fixture question"), ("assistant", "缓存 fixture answer claude")]]
+                rows.insert(0, {"type": "file-history-snapshot", "snapshot": {"trackedFileBackups": {}}})
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
             paths[runtime] = path

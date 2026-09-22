@@ -31,7 +31,8 @@ def inventory(codex_home, claude_home):
                     continue
                 session = record.get("payload", {}).get("id")
             else:
-                session = record.get("sessionId")
+                # Claude may start with bookkeeping that has no sessionId; its carrier name is the native UUID.
+                session = record.get("sessionId") or path.stem
                 if "subagents" in path.parts:
                     continue
             if not session:

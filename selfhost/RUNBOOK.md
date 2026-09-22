@@ -36,7 +36,9 @@ Git transport, Chinese search, filters, MCP reads before cloning, incremental
 versions, Git LFS restoration, rejected transactions, restart persistence and
 token revocation. It retains temporary data for diagnosis and prints that path.
 No real native sessions are read. Raw local test reports are ignored by Git.
-The `Self-hosted Hub` workflow runs the protocol test on Ubuntu 24.04.
+The `Self-hosted Hub` workflow runs the protocol test against a release server
+on Ubuntu 24.04. Successful runs attach `agit-selfhost-linux-x86_64` with its
+SHA-256 checksum. This artifact is for x86-64 Linux, not an ARM VPS.
 
 ## Ubuntu deployment
 
