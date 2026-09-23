@@ -6,6 +6,62 @@ Every notable change to agit, the AgentGit CLI, by release. The format follows
 its [GitHub Release](https://github.com/Einsia/agent-git/releases), and the
 `@einsia/agent-git` npm package ships this file.
 
+## [0.2.6] - 2026-09-23
+
+### Changed
+
+- **Download counting on the Hub.** Git and Git LFS requests that agit sends to
+  the configured Hub carry `X-AgentGit-Command` (the top-level command, such as
+  `clone` or `pull`) and `X-AgentGit-Operation` (a random ID generated once per
+  process), so the Hub counts one download per invocation and repository
+  instead of one per negotiation round or credential retry. The headers contain
+  no arguments, names, paths or machine identifiers, and other Git remotes never
+  receive them. See [Hub download attribution](docs/telemetry.md#hub-download-attribution).
+- Session page links printed by `agit show` and `agit file link` add
+  `sharer=<username>` when you are signed in to that Hub, so visits through a
+  link you paste are credited to you. Signed out, links are unchanged.
+
+## [0.2.5] - 2026-09-23
+
+### Added
+
+- **Invite links from the CLI.** `agit repo invite <owner/repo>` prints a link
+  that adds whoever opens it as a collaborator (`--role read|write|owner`,
+  default `read`). `agit repo invite <owner/repo>@<branch>` (or `-b <branch>`)
+  also lands the invitee on that branch's session page after they accept. Only
+  repository owners can create links; they do not expire and can be revoked in
+  the repository's settings (Invite by link). A session link requires the
+  session to be pushed already. `--json` reports the link, role, repository,
+  invitation ID and, for a session, its page URL.
+
+### Changed
+
+- Remote Control history projection reuses compiled persona patterns, so long
+  shared histories page in faster.
+
+### Fixed
+
+- `agit rc stop` now waits for the daemon to exit before reporting success, so
+  an immediate `agit rc start` no longer races the previous daemon.
+- Remote Control discovers native sessions when the same project folder is
+  bound through equivalent directory paths.
+- The `npx create-agit` installer's closing hint no longer suggests an
+  outdated `agit import` invocation; it points to the quickstart instead.
+
+## [0.2.4] - 2026-09-21
+
+### Fixed
+
+- Return an existing native Codex inbox receipt before probing the executable,
+  so reconnect retries remain observable when Codex is temporarily unavailable.
+  Retries with the same message ID do not enqueue another message.
+- Coalesce repeated native history protection failures and keep internal error
+  details in daemon logs instead of repeating them in conversation history.
+- Preserve native conversation titles in session pickers and omit runtime
+  bookkeeping from message previews and counts.
+- Settle multiple newly detected heuristic secrets in one pass, and bound identity
+  evidence to the provenance budget when scanning large inputs.
+
 ## [0.2.3] - 2026-09-20
 
 ### Added

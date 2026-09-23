@@ -87,6 +87,11 @@ pub(crate) struct NativeJson {
     pub registered_ids: Vec<String>,
 }
 
+/// User-facing text for a native record that could not pass the local privacy boundary.
+/// Internal protection errors belong in the daemon log and must not be sent to viewers.
+pub(crate) const PROTECTION_ERROR_TEXT: &str =
+    "[content unavailable: local privacy protection could not complete]";
+
 /// The device-local persona: "who this machine is", read out of the environment.
 #[derive(Debug, Clone, Default)]
 pub struct Persona {
@@ -124,6 +129,8 @@ impl Persona {
 #[derive(Clone)]
 pub struct Redactor {
     persona: Persona,
+    username_pattern: Option<Regex>,
+    hostname_pattern: Option<Regex>,
     #[cfg(feature = "secret-vault")]
     require_repository: bool,
     buffered_stream_bytes: Arc<AtomicUsize>,
@@ -205,11 +212,7 @@ fn apply_spans(out: &mut String, spans: &[(usize, usize, String)], count: &mut u
 
 /// Replacement wrapped in word boundaries (the regex crate has no lookaround, so the boundary is
 /// "capture what precedes + check what follows by hand").
-fn replace_token(text: &str, token: &str, with: &str, count: &mut usize) -> String {
-    // Boundary character set: path separators, dots and colons all count as "outside", so
-    // /etc/<user>, <user>@host and <user>:<group> all match while <user>name and my<user> do
-    // not.
-    let re = Regex::new(&format!(r"(^|[^A-Za-z0-9._-]){}", regex::escape(token))).unwrap();
+fn replace_token(text: &str, token: &str, re: &Regex, with: &str, count: &mut usize) -> String {
     let view = crate::domain::secrets::view_of(text);
     let mut spans: Vec<(usize, usize, String)> = vec![];
     let mut pos = 0;
@@ -235,9 +238,18 @@ fn replace_token(text: &str, token: &str, with: &str, count: &mut usize) -> Stri
     out
 }
 
+fn token_pattern(token: Option<&str>) -> Option<Regex> {
+    // Dots, underscores, hyphens, and ASCII alphanumerics keep a token inside a longer name.
+    token
+        .filter(|token| token.len() >= 3)
+        .map(|token| Regex::new(&format!(r"(^|[^A-Za-z0-9._-]){}", regex::escape(token))).unwrap())
+}
+
 impl Redactor {
     pub fn new(persona: Persona) -> Self {
         Redactor {
+            username_pattern: token_pattern(persona.username.as_deref()),
+            hostname_pattern: token_pattern(persona.hostname.as_deref()),
             persona,
             #[cfg(feature = "secret-vault")]
             require_repository: false,
@@ -257,13 +269,8 @@ impl Redactor {
         registered: crate::domain::secret_filter::MatcherHandle,
     ) -> Self {
         Redactor {
-            persona,
-            require_repository: false,
-            buffered_stream_bytes: Arc::new(AtomicUsize::new(0)),
             registered,
-            dictionary: None,
-            #[cfg(feature = "rc")]
-            native: None,
+            ..Self::new(persona)
         }
     }
 
@@ -332,7 +339,7 @@ impl Redactor {
         records: &[(&serde_json::Value, &[&str])],
     ) -> Vec<NativeJson> {
         let withheld = || NativeJson {
-            value: serde_json::json!({"protection_error":"content withheld: repository secret protection failed"}),
+            value: serde_json::json!({"protection_error": PROTECTION_ERROR_TEXT}),
             secret_projection: true,
             registered_ids: Vec::new(),
         };
@@ -421,16 +428,42 @@ impl Redactor {
                     })
                     .collect()
             };
-            // Failure isolation reuses each occurrence's mask; later evidence cannot bless an earlier record.
-            Ok(protect(0..records.len()).unwrap_or_else(|_| {
-                (0..records.len())
-                    .flat_map(|index| {
-                        protect(index..index + 1).unwrap_or_else(|_| vec![withheld()])
-                    })
-                    .collect()
-            }))
+            // A single oversized or malformed record must not hide healthy neighbors. Retry
+            // each record with its original mask, while keeping every failed record fail-closed.
+            match protect(0..records.len()) {
+                Ok(values) => Ok(values),
+                Err(batch_error) => {
+                    let mut values = Vec::with_capacity(records.len());
+                    let mut first_failure = None;
+                    for index in 0..records.len() {
+                        match protect(index..index + 1) {
+                            Ok(mut item) => values.append(&mut item),
+                            Err(error) => {
+                                first_failure.get_or_insert(error);
+                                values.push(withheld());
+                            }
+                        }
+                    }
+                    if let Some(error) = first_failure {
+                        eprintln!(
+                            "agitd: native secret projection batch failed; retried {} records: {batch_error:#}",
+                            records.len()
+                        );
+                        eprintln!(
+                            "agitd: native secret projection withheld one or more records: {error:#}"
+                        );
+                    }
+                    Ok(values)
+                }
+            }
         })();
-        result.unwrap_or_else(|_| records.iter().map(|_| withheld()).collect())
+        result.unwrap_or_else(|error| {
+            eprintln!(
+                "agitd: native secret projection withheld {} records: {error:#}",
+                records.len()
+            );
+            records.iter().map(|_| withheld()).collect()
+        })
     }
 
     #[cfg(feature = "rc")]
@@ -501,7 +534,7 @@ impl Redactor {
     /// Redact one text. Deterministic: same input, same persona ⇒ same output.
     pub fn scrub(&self, text: &str) -> Report {
         self.try_scrub(text).unwrap_or_else(|_| Report {
-            text: "[content withheld: repository secret protection failed]".into(),
+            text: PROTECTION_ERROR_TEXT.into(),
             ..empty_report()
         })
     }
@@ -603,15 +636,11 @@ impl Redactor {
         }
 
         // ── 4. Bare username and hostname — outside /home too: chown user:group, ssh user@host ──
-        if let Some(user) = persona_user
-            && user.len() >= 3
-        {
-            out = replace_token(&out, user, "user", &mut paths);
+        if let (Some(user), Some(pattern)) = (persona_user, &self.username_pattern) {
+            out = replace_token(&out, user, pattern, "user", &mut paths);
         }
-        if let Some(host) = &self.persona.hostname
-            && host.len() >= 3
-        {
-            out = replace_token(&out, host, "host", &mut paths);
+        if let (Some(host), Some(pattern)) = (&self.persona.hostname, &self.hostname_pattern) {
+            out = replace_token(&out, host, pattern, "host", &mut paths);
         }
 
         // ── 5. Public IPs ──
@@ -651,8 +680,11 @@ impl Redactor {
     /// would miss `\"`, `\\` and `\n` inside a registered literal.
     pub fn scrub_json(&self, value: &serde_json::Value) -> JsonReport {
         self.try_scrub_json(value).unwrap_or_else(|_| JsonReport {
-            value: serde_json::json!({"protection_error": "content withheld: repository secret protection failed"}),
-            secrets: 0, paths: 0, ips: 0, registered_ids: vec![],
+            value: serde_json::json!({"protection_error": PROTECTION_ERROR_TEXT}),
+            secrets: 0,
+            paths: 0,
+            ips: 0,
+            registered_ids: vec![],
         })
     }
 
