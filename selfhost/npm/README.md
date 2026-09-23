@@ -12,6 +12,23 @@ update the package; the running server is a native executable. The package has
 no JavaScript dependencies or install scripts, and installation does not start
 services, create credentials, or import sessions.
 
+## Install from npm
+
+The fork's published package is
+[`@jooooesg/agit-selfhost`](https://www.npmjs.com/package/@jooooesg/agit-selfhost).
+For a new Ubuntu 24.04 x86-64 installation:
+
+```sh
+sudo npm install --global --prefix /opt/agit-selfhost --ignore-scripts \
+  --no-audit --no-fund @jooooesg/agit-selfhost@0.1.0
+/opt/agit-selfhost/bin/agit-selfhost --help
+```
+
+The preview release uses the `next` tag. Pin a version for reproducible installs.
+Complete the service and HTTPS setup in `RUNBOOK.md` before connecting clients.
+For an existing standalone installation, preserve its executable path as
+described below.
+
 ## Install a downloaded package
 
 Verify the tarball against the checksum supplied by the release, then use a
