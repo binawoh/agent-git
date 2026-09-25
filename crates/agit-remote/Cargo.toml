@@ -1,0 +1,29 @@
+[package]
+name = "agit-remote"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+description = "Cloud peer relay and Web console for a private AgentGit Hub"
+publish = false
+
+[dependencies]
+agit-controller = { path = "../agit-controller", features = ["host"] }
+agit-peer = { path = "../agit-peer", features = ["cloud-client"] }
+agit-tunnel = { path = "../agit-tunnel", features = ["worker"] }
+anyhow = "1"
+axum = { version = "0.8", features = ["ws"] }
+clap = { version = "4", features = ["derive"] }
+futures-util = { version = "0.3", features = ["sink"] }
+getrandom = "0.3"
+hex = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rust-embed = { version = "8", features = ["mime-guess"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-std", "io-util"] }
+tower-http = { version = "0.6", features = ["compression-gzip"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }

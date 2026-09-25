@@ -1,0 +1,27 @@
+[Unit]
+Description=AgentGit cloud peer relay and Web console
+After=network.target agit-selfhost.service
+Wants=agit-selfhost.service
+
+[Service]
+User=agit-remote
+Group=agit-remote
+UMask=0077
+WorkingDirectory=/var/lib/agit-remote
+ExecStart=/usr/local/bin/agit-remote serve --data /var/lib/agit-remote --listen 127.0.0.1:8178 --public-url https://history.example.com --upstream http://127.0.0.1:8177
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/agit-remote
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryMax=256M
+TasksMax=128
+LimitNOFILE=4096
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target
