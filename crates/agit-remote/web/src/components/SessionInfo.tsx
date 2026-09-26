@@ -157,7 +157,19 @@ export function slashCommands(live: SlashCommand[], names: unknown, catalog: Sla
       : [];
   const listed = reported.map((command) => ({ ...command, description: command.description || described.get(command.name) }));
   const seen = new Set(listed.map((command) => command.name));
-  return [...listed, ...catalog.filter((command) => !seen.has(command.name))];
+  return ordered([...listed, ...catalog.filter((command) => !seen.has(command.name))]);
+}
+
+/** The source Claude Code appends to the description of a command that is not its own. */
+const addedSource = /\((user|project|plugin|claude\.ai sync|dynamic workflow)[^)]*\)\s*$/;
+
+/** The agent's own commands first, as the desktop app lists them, then those that users,
+ *  projects and plugins added. A name with a leading double underscore is an internal entry
+ *  point of the CLI and is not offered. */
+function ordered(commands: SlashCommand[]): SlashCommand[] {
+  const offered = commands.filter((command) => !command.name.startsWith("__"));
+  const added = (command: SlashCommand) => command.name.includes(":") || addedSource.test(command.description ?? "");
+  return [...offered.filter((command) => !added(command)), ...offered.filter(added)];
 }
 
 export function extensionInfo(state: ModelState): ExtensionInfo | null {
