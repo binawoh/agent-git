@@ -65,7 +65,7 @@ export function Composer(props: {
   const input = useRef<HTMLInputElement>(null);
   const uploading = files.some((file) => file.path === null);
   const slashQuery = /^\/([^\s]*)$/.exec(text)?.[1];
-  const slashMatches = slashQuery === undefined ? [] : (props.commands ?? []).filter((command) => command.name.toLowerCase().includes(slashQuery.toLowerCase())).slice(0, 50);
+  const slashMatches = slashQuery === undefined ? [] : (props.commands ?? []).filter((command) => command.name.toLowerCase().includes(slashQuery.toLowerCase()));
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const slashOpen = slashMatches.length > 0 && !slashDismissed;
@@ -227,6 +227,7 @@ export function Composer(props: {
                 role="option"
                 aria-selected={index === slashIndex}
                 className={`slash-option ${index === slashIndex ? "active" : ""}`}
+                title={command.description}
                 onMouseEnter={() => setSlashIndex(index)}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => pickCommand(command)}

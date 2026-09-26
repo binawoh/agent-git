@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { HistoryItem, ModelState } from "../types";
+import type { HistoryItem, ModelState, RuntimeCapability } from "../types";
 import type { ExtensionInfo, SlashCommand } from "./Composer";
 
 export interface ContextUse {
@@ -140,28 +140,24 @@ export function lastNative(runtime: string): NativeLists {
   return { commands: [], extensions: null };
 }
 
-/** Claude Code names its commands; a few common ones get a description here. */
-const claudeDescriptions: Record<string, string> = {
-  compact: "压缩对话历史，释放上下文",
-  clear: "清空对话，重新开始",
-  context: "查看上下文的使用情况",
-  cost: "查看这个会话的花费",
-  init: "为项目生成 CLAUDE.md",
-  review: "审查代码改动",
-  "security-review": "检查改动里的安全问题",
-  memory: "查看或编辑记忆文件",
-  status: "查看会话状态",
-};
+/** The machine's catalog of an agent's commands, each with the agent's own description. */
+export function commandCatalog(capability: RuntimeCapability | undefined): SlashCommand[] {
+  return (capability?.commands ?? []).map((command) => ({ name: command.name, description: command.description ?? undefined }));
+}
 
-/** Commands the agent accepts: Claude Code lists names at start, Codex lists its own commands. */
-export function slashCommands(state: ModelState, codexCommands: SlashCommand[]): SlashCommand[] {
-  const names = state.native?.slash_commands;
-  if (Array.isArray(names)) {
-    return names
-      .filter((name): name is string => typeof name === "string" && name.length > 0)
-      .map((name) => ({ name, description: claudeDescriptions[name] }));
-  }
-  return codexCommands;
+/** Commands the agent accepts. A live agent's own list comes first; Claude Code's start report
+ *  names its commands only, so descriptions come from the machine's catalog, which also stands
+ *  in while the agent has reported nothing. */
+export function slashCommands(live: SlashCommand[], names: unknown, catalog: SlashCommand[]): SlashCommand[] {
+  const described = new Map(catalog.map((command) => [command.name, command.description]));
+  const reported: SlashCommand[] = live.length
+    ? live
+    : Array.isArray(names)
+      ? names.filter((name): name is string => typeof name === "string" && name.length > 0).map((name) => ({ name }))
+      : [];
+  const listed = reported.map((command) => ({ ...command, description: command.description || described.get(command.name) }));
+  const seen = new Set(listed.map((command) => command.name));
+  return [...listed, ...catalog.filter((command) => !seen.has(command.name))];
 }
 
 export function extensionInfo(state: ModelState): ExtensionInfo | null {
@@ -182,8 +178,157 @@ export function tokens(count: number): string {
   return String(count);
 }
 
-/** A ring filled to the share of the context window in use; a tap shows the numbers. */
-export function ContextRing({ use }: { use: ContextUse }) {
+type LimitReport = NonNullable<ModelState["rate_limits"]>;
+
+/** One plan limit: the share of it used and when its window starts over, in Unix seconds. */
+export interface LimitWindow {
+  key: string;
+  label: string;
+  used: number;
+  resetsAt: number | null;
+}
+
+export interface PlanUsage {
+  plan: string | null;
+  windows: LimitWindow[];
+  /** When the executor received the report, in Unix seconds. */
+  observedAt: number | null;
+}
+
+// Plan limits belong to the account rather than a session, and agents report them only with a
+// model call; the newest report of each agent is kept in this browser and shown in its sessions.
+const limitsKey = (runtime: string) => `agit.limits.${runtime}`;
+
+function savedLimits(runtime: string): LimitReport | null {
+  try {
+    const saved = JSON.parse(localStorage.getItem(limitsKey(runtime)) ?? "null");
+    return saved && typeof saved === "object" && saved.info ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The newer of a session's report and the one kept in this browser. */
+export function newestLimits(runtime: string, report: LimitReport | null | undefined): LimitReport | null {
+  const saved = savedLimits(runtime);
+  if (!report?.info) return saved;
+  return saved && (saved.observed_at ?? 0) > (report.observed_at ?? 0) ? saved : report;
+}
+
+export function rememberLimits(runtime: string, report: LimitReport | null | undefined): void {
+  if (!report?.info || newestLimits(runtime, report) !== report) return;
+  try {
+    localStorage.setItem(limitsKey(runtime), JSON.stringify(report));
+  } catch {
+    // Storage is a convenience here.
+  }
+}
+
+/** Claude Code's windows, in the order its own usage panel lists them. */
+const claudeLimitNames: Record<string, string> = {
+  five_hour: "5 小时限额",
+  seven_day: "每周 · 所有模型",
+  seven_day_opus: "每周 · Opus",
+  seven_day_sonnet: "每周 · Sonnet",
+};
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** Claude Code reports each window's use as a fraction; a report without the windows still
+ *  names the one limit it is about. */
+function claudeWindows(info: Record<string, any>): LimitWindow[] {
+  const unified = info.unifiedWindows;
+  if (unified && typeof unified === "object") {
+    return Object.entries(claudeLimitNames).flatMap(([key, label]) => {
+      const window = unified[key];
+      return window && typeof window.utilization === "number" ? [{ key, label, used: window.utilization, resetsAt: numberOrNull(window.resetsAt) }] : [];
+    });
+  }
+  const type = info.rateLimitType;
+  if (typeof type === "string" && claudeLimitNames[type] && typeof info.utilization === "number") {
+    return [{ key: type, label: claudeLimitNames[type], used: info.utilization, resetsAt: numberOrNull(info.resetsAt) }];
+  }
+  return [];
+}
+
+/** Codex reports a percentage per window and names a window by its length. */
+function codexWindow(key: string, window: any): LimitWindow[] {
+  if (!window || typeof window.usedPercent !== "number") return [];
+  const minutes = window.windowDurationMins;
+  const label =
+    minutes === 300
+      ? "5 小时限额"
+      : minutes === 10080
+        ? "每周限额"
+        : typeof minutes === "number" && minutes > 0
+          ? minutes % 1440 === 0
+            ? `${minutes / 1440} 天限额`
+            : `${+(minutes / 60).toFixed(1)} 小时限额`
+          : key === "primary"
+            ? "短期限额"
+            : "长期限额";
+  return [{ key, label, used: window.usedPercent / 100, resetsAt: numberOrNull(window.resetsAt) }];
+}
+
+export function planUsage(runtime: string, report: LimitReport | null | undefined): PlanUsage | null {
+  const info = report?.info;
+  if (!info || typeof info !== "object") return null;
+  const windows = runtime === "codex" ? [...codexWindow("primary", info.primary), ...codexWindow("secondary", info.secondary)] : claudeWindows(info);
+  if (!windows.length) return null;
+  const planType = runtime === "codex" ? info.planType : null;
+  const plan = typeof planType === "string" && planType !== "unknown" ? planType.charAt(0).toUpperCase() + planType.slice(1) : null;
+  return { plan, windows, observedAt: numberOrNull(report?.observed_at) };
+}
+
+const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+function clock(date: Date): string {
+  return `${date.getHours()}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+/** When a window starts over: a countdown within a day, otherwise the weekday and time. */
+function resetText(resetsAt: number | null, now: number): string {
+  if (resetsAt === null) return "";
+  const seconds = resetsAt - now / 1000;
+  if (seconds <= 0) return "已重置";
+  if (seconds < 3600) return `${Math.max(1, Math.floor(seconds / 60))} 分钟后重置`;
+  if (seconds < 86400) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return minutes ? `${hours} 小时 ${minutes} 分后重置` : `${hours} 小时后重置`;
+  }
+  const date = new Date(resetsAt * 1000);
+  return `${weekdays[date.getDay()]} ${clock(date)} 重置`;
+}
+
+function observedText(observedAt: number | null, now: number): string {
+  if (observedAt === null) return "";
+  const age = now / 1000 - observedAt;
+  if (age < 60) return "刚刚更新";
+  if (age < 3600) return `${Math.floor(age / 60)} 分钟前更新`;
+  const date = new Date(observedAt * 1000);
+  const today = new Date(now).toDateString() === date.toDateString();
+  return today ? `今天 ${clock(date)} 更新` : `${date.getMonth() + 1}月${date.getDate()}日 ${clock(date)} 更新`;
+}
+
+function tone(share: number | null): string {
+  return share === null ? "" : share > 0.9 ? "danger" : share > 0.7 ? "warn" : "";
+}
+
+function UsageBar({ share }: { share: number }) {
+  const width = share > 0 ? Math.max(1, Math.min(1, share) * 100) : 0;
+  return (
+    <div className="context-bar">
+      <div className={`context-bar-fill ${tone(share)}`} style={{ width: `${width}%` }} />
+    </div>
+  );
+}
+
+/** The ring beside the pickers, filled to the share of the context window in use. A tap shows
+ *  the context and the account's plan limits, as the desktop app's usage panel does. */
+export function UsageRing({ context, usage }: { context: ContextUse | null; usage: PlanUsage | null }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -194,15 +339,19 @@ export function ContextRing({ use }: { use: ContextUse }) {
     document.addEventListener("pointerdown", close);
     return () => document.removeEventListener("pointerdown", close);
   }, [open]);
-  const share = use.window ? Math.min(1, use.used / use.window) : null;
-  const percent = share === null ? null : Math.round(share * 100);
-  const label = use.window ? `上下文 ${tokens(use.used)} / ${tokens(use.window)}（${percent}%）` : `上下文 ${tokens(use.used)}`;
+  const now = Date.now();
+  const share = context?.window ? Math.min(1, context.used / context.window) : null;
+  const contextText = context ? (context.window ? `${tokens(context.used)} / ${tokens(context.window)}（${Math.round((share ?? 0) * 100)}%）` : tokens(context.used)) : null;
+  const current = usage?.windows.filter((window) => window.resetsAt === null || window.resetsAt * 1000 > now) ?? [];
+  const busiest = current.reduce<LimitWindow | null>((top, window) => (!top || window.used > top.used ? window : top), null);
+  const title = [contextText && `上下文 ${contextText}`, busiest && `${busiest.label} ${Math.round(busiest.used * 100)}% · ${resetText(busiest.resetsAt, now)}`]
+    .filter(Boolean)
+    .join("\n");
   const radius = 7;
   const circumference = 2 * Math.PI * radius;
-  const tone = share === null ? "" : share > 0.9 ? "danger" : share > 0.7 ? "warn" : "";
   return (
     <div className="menu-anchor" ref={anchor}>
-      <button type="button" className={`context-ring ${tone}`} title={label} aria-label={label} onClick={() => setOpen(!open)}>
+      <button type="button" className={`context-ring ${tone(share)}`} title={title} aria-label={title || "用量"} onClick={() => setOpen(!open)}>
         <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
           <circle cx="9" cy="9" r={radius} className="context-ring-track" />
           <circle
@@ -218,16 +367,37 @@ export function ContextRing({ use }: { use: ContextUse }) {
       </button>
       {open && (
         <div className="menu-popover top right context-popover">
-          <div className="context-row">
-            <span>上下文窗口</span>
-            <span>{use.window ? `${tokens(use.used)} / ${tokens(use.window)}（${percent}%）` : tokens(use.used)}</span>
-          </div>
-          {share !== null && (
-            <div className="context-bar">
-              <div className={`context-bar-fill ${tone}`} style={{ width: `${Math.max(1, share * 100)}%` }} />
-            </div>
+          {context && (
+            <section className="usage-section">
+              <div className="context-row">
+                <span>上下文窗口</span>
+                <span>{contextText}</span>
+              </div>
+              {share !== null && <UsageBar share={share} />}
+            </section>
           )}
-          <p className="context-note">按最近一次模型调用统计；快满时可以用 /compact 压缩对话。</p>
+          {usage && (
+            <section className="usage-section">
+              <div className="usage-heading">
+                <span>{usage.plan ? `套餐用量 · ${usage.plan}` : "套餐用量"}</span>
+                <span>{observedText(usage.observedAt, now)}</span>
+              </div>
+              {usage.windows.map((window) => {
+                const over = window.resetsAt !== null && window.resetsAt * 1000 <= now;
+                return (
+                  <div key={window.key} className="usage-window">
+                    <div className="usage-row">
+                      <span className="usage-label">{window.label}</span>
+                      <span className="usage-reset">{resetText(window.resetsAt, now)}</span>
+                      <span className="usage-percent">{over ? "—" : `${Math.round(window.used * 100)}%`}</span>
+                    </div>
+                    <UsageBar share={over ? 0 : window.used} />
+                  </div>
+                );
+              })}
+            </section>
+          )}
+          {context && <p className="context-note">上下文按最近一次模型调用统计，快满时可以用 /compact 压缩对话。</p>}
         </div>
       )}
     </div>

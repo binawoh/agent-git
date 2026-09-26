@@ -34,6 +34,8 @@ export interface RuntimeCapability {
   approvals?: boolean;
   interrupt?: boolean;
   resume?: boolean;
+  /** Commands the machine's agent accepts in every project, each with its own description. */
+  commands?: { name: string; description?: string | null; argument_hint?: string | null }[];
 }
 
 export interface MachineDescription {
@@ -168,4 +170,7 @@ export interface ModelState {
   native?: Record<string, any> | null;
   /** Codex: the thread's latest token usage as the app-server reported it. */
   token_usage?: Record<string, any> | null;
+  /** The account's plan limits as the agent last reported them with a model call, and when the
+   *  executor received that report, in Unix seconds. */
+  rate_limits?: { observed_at?: number; info?: Record<string, any> | null } | null;
 }

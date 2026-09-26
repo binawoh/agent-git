@@ -4,7 +4,7 @@ import { continueStored, interrupt, loadHistory, loadModels, nativeRecords, proj
 import { emptyTranscript } from "../transcript";
 import type { LocalSession, ModelChoice, ModelState, SessionInfo } from "../types";
 import { Composer, type AttachTarget, type SlashCommand } from "./Composer";
-import { ContextRing, contextUse, extensionInfo, lastNative, recordedSettings, rememberNative, slashCommands, type RecordedSettings } from "./SessionInfo";
+import { commandCatalog, contextUse, extensionInfo, lastNative, newestLimits, planUsage, recordedSettings, rememberLimits, rememberNative, slashCommands, UsageRing, type RecordedSettings } from "./SessionInfo";
 import { blocks, EntryView } from "./Entries";
 import { effortName, runtimeName } from "./labels";
 import { EffortPicker, effortOptions, ModelPicker, modelOptions, ModePicker } from "./Pickers";
@@ -111,6 +111,9 @@ function LocalComposer({ session }: { session: LocalSession }) {
   const [mode, setMode] = useState("");
   const [recorded, setRecorded] = useState<RecordedSettings>({});
   const native = useMemo(() => lastNative(session.runtime), [session.runtime]);
+  const catalog = useMemo(() => commandCatalog(capability), [capability]);
+  const commands = slashCommands(native.commands, null, catalog);
+  const usage = planUsage(session.runtime, newestLimits(session.runtime, null));
 
   // Read again when the transcript grows, so changes made by another program show up too.
   useEffect(() => {
@@ -160,7 +163,7 @@ function LocalComposer({ session }: { session: LocalSession }) {
             permissionMode: mode || undefined,
           })
         }
-        commands={native.commands}
+        commands={commands}
         extensions={native.extensions}
         left={<ModePicker keep kept={recorded.mode} value={mode} modes={modes} disabled={modes.length === 0} onChange={setMode} />}
         right={
@@ -181,7 +184,7 @@ function LocalComposer({ session }: { session: LocalSession }) {
               options={[{ value: "", label: ownEffort ? `沿用原强度（${ownEffort}）` : "沿用原强度", description: "保持这个会话原来的思考强度" }, ...effortOptions(efforts)]}
               onChange={setEffort}
             />
-            {recorded.context && <ContextRing use={recorded.context} />}
+            {(recorded.context || usage) && <UsageRing context={recorded.context ?? null} usage={usage} />}
           </>
         }
       />
@@ -196,8 +199,9 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
   const [state, setState] = useState<ModelState>({});
   // The executor refuses model changes during a turn; a change made then waits for its end.
   const [queued, setQueued] = useState<{ model?: string; effort?: string } | null>(null);
-  const [codexCommands, setCodexCommands] = useState<SlashCommand[]>([]);
+  const [liveCommands, setLiveCommands] = useState<SlashCommand[]>([]);
   const [recorded, setRecorded] = useState<RecordedSettings>({});
+  const live = session.status !== "detached" && session.status !== "ended";
 
   // Context use changes with every turn, so the state is read again whenever a turn ends.
   useEffect(() => {
@@ -216,25 +220,28 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
   }, [session.session_id, running]);
 
   useEffect(() => {
-    if (session.runtime !== "codex") return;
+    if (!live) return;
     let cancelled = false;
     void sessionCommands(session.session_id).then((commands) => {
-      if (!cancelled) setCodexCommands(commands.map((command) => ({ name: command.name, description: command.description })));
+      if (!cancelled) setLiveCommands(commands.map((command) => ({ name: command.name, description: command.description })));
     });
     return () => {
       cancelled = true;
     };
-  }, [session.session_id, session.runtime]);
+  }, [session.session_id, live]);
 
-  const commands = slashCommands(state, codexCommands);
+  const catalog = useMemo(() => commandCatalog(capability), [capability]);
+  const commands = slashCommands(liveCommands, state.native?.slash_commands, catalog);
   const extensions = extensionInfo(state);
   const context = contextUse(state) ?? recorded.context ?? null;
-  useEffect(() => rememberNative(session.runtime, { commands, extensions }), [session.runtime, state, codexCommands]);
+  const usage = planUsage(session.runtime, newestLimits(session.runtime, state.rate_limits));
+  useEffect(() => rememberNative(session.runtime, { commands, extensions }), [session.runtime, state, liveCommands, catalog]);
+  useEffect(() => rememberLimits(session.runtime, state.rate_limits), [session.runtime, state.rate_limits]);
 
   /** Codex runs its commands natively; Claude Code reads a `/name` message itself. */
   function submit(text: string) {
     const command = /^\/([\w:.-]+)\s*$/.exec(text.trim())?.[1];
-    if (session.runtime === "codex" && command && codexCommands.some((item) => item.name === command)) return runCommand(session.session_id, command);
+    if (session.runtime === "codex" && command && liveCommands.some((item) => item.name === command)) return runCommand(session.session_id, command);
     return send(session.session_id, text);
   }
 
@@ -306,7 +313,7 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
               note={note}
               onChange={(value) => void change({ effort: value })}
             />
-            {context && <ContextRing use={context} />}
+            {(context || usage) && <UsageRing context={context} usage={usage} />}
           </>
         }
       />
