@@ -1,6 +1,6 @@
 import { ArrowUp, File as FileIcon, FolderOpen, Image as ImageIcon, LoaderCircle, Plus, Square, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { toast, uploadFile, withAttachments } from "../store";
+import { readImage, toast, uploadFile, withAttachments } from "../store";
 import { FilePicker } from "./FilePicker";
 import { ActionMenu } from "./Menu";
 
@@ -15,6 +15,8 @@ interface Attachment {
   key: string;
   name: string;
   path: string | null;
+  /** A local object URL for an image picked on this device, shown before upload finishes. */
+  preview?: string;
 }
 
 /** Enter sends on devices with a keyboard; an IME composition never sends (it confirms a
@@ -53,7 +55,8 @@ export function Composer(props: {
     if (!target) return;
     for (const file of list) {
       const key = crypto.randomUUID();
-      setFiles((current) => [...current, { key, name: file.name || "image.png", path: null }]);
+      const preview = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
+      setFiles((current) => [...current, { key, name: file.name || "image.png", path: null, preview }]);
       try {
         const saved = await uploadFile(target.projectId, file);
         setFiles((current) => current.map((item) => (item.key === key ? { ...item, path: saved } : item)));
@@ -138,7 +141,13 @@ export function Composer(props: {
           <div className="attachments">
             {files.map((file) => (
               <span key={file.key} className={`attachment ${file.path ? "" : "uploading"}`} title={file.path ?? "上传中…"}>
-                {file.path === null ? <LoaderCircle size={13} className="spin" /> : imageName.test(file.name) ? <ImageIcon size={13} /> : <FileIcon size={13} />}
+                {imageName.test(file.name) || file.preview ? (
+                  <Thumbnail file={file} />
+                ) : file.path === null ? (
+                  <LoaderCircle size={13} className="spin" />
+                ) : (
+                  <FileIcon size={13} />
+                )}
                 <span className="attachment-name">{file.name}</span>
                 <button
                   type="button"
@@ -216,5 +225,37 @@ export function Composer(props: {
         />
       )}
     </div>
+  );
+}
+
+/** The picture of an image attachment: the local copy while it uploads, otherwise the file as
+ *  saved on the machine. A tap shows it full size. */
+function Thumbnail({ file }: { file: Attachment }) {
+  const [remote, setRemote] = useState<string | null>(null);
+  const [zoomed, setZoomed] = useState(false);
+  useEffect(() => {
+    if (file.preview || !file.path) return;
+    let cancelled = false;
+    void readImage(file.path).then((url) => {
+      if (!cancelled) setRemote(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [file.preview, file.path]);
+  const url = file.preview ?? remote;
+  if (!url) return file.path === null ? <LoaderCircle size={13} className="spin" /> : <ImageIcon size={13} />;
+  return (
+    <>
+      <button type="button" className="attachment-thumb" title="查看大图" onClick={() => setZoomed(true)}>
+        <img src={url} alt={file.name} />
+        {file.path === null && <LoaderCircle size={14} className="spin attachment-thumb-busy" />}
+      </button>
+      {zoomed && (
+        <div className="image-viewer" onClick={() => setZoomed(false)}>
+          <img src={url} alt={file.name} />
+        </div>
+      )}
+    </>
   );
 }

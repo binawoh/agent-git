@@ -2531,3 +2531,29 @@ textarea:focus-visible {
   object-fit: contain;
   border-radius: 8px;
 }
+
+.attachment-thumb {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--code);
+  cursor: zoom-in;
+}
+
+.attachment-thumb img {
+  display: block;
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+}
+
+.attachment-thumb-busy {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  color: #fff;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.6));
+}
