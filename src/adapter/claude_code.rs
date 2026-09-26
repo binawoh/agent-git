@@ -68,8 +68,19 @@ pub(crate) fn resolve_readonly(session_id: &str) -> Result<PathBuf> {
 /// Map a cwd onto Claude Code's project directory name.
 ///
 /// Must match Claude Code's own algorithm, or it never finds the session installed into it.
+/// Claude Code slugs the cwd as the shell reports it, so a Windows verbatim path (`\\?\D:\x`,
+/// which canonicalization returns) is slugged without its prefix; otherwise the prefix becomes
+/// leading dashes and every lookup under a canonical root misses.
 pub fn slug_for(cwd: &Path) -> String {
-    crate::domain::store::slug_for(cwd)
+    let text = cwd.to_string_lossy();
+    let shell_form = if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        cwd.to_path_buf()
+    };
+    crate::domain::store::slug_for(&shell_form)
 }
 
 impl Adapter for ClaudeCode {
@@ -1004,6 +1015,18 @@ fn extract_paths(input: Option<&serde_json::Value>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A bound project root is canonical, which on Windows is a verbatim path; slugging the
+    /// prefix too would point every lookup at a directory Claude Code never creates.
+    #[test]
+    fn verbatim_windows_paths_slug_like_the_shell_path() {
+        assert_eq!(slug_for(Path::new(r"\\?\D:\xiaomi6")), "D--xiaomi6");
+        assert_eq!(
+            slug_for(Path::new(r"\\?\UNC\server\share\repo")),
+            slug_for(Path::new(r"\\server\share\repo"))
+        );
+        assert_eq!(slug_for(Path::new("/home/me/repo")), "-home-me-repo");
+    }
 
     #[test]
     fn parses_both_content_shapes() {
