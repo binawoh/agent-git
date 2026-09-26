@@ -96,7 +96,11 @@ let toastId = 0;
 export function toast(text: string, tone: Toast["tone"] = "error"): void {
   const id = ++toastId;
   set((state) => ({ toasts: [...state.toasts, { id, text, tone }] }));
-  setTimeout(() => set((state) => ({ toasts: state.toasts.filter((item) => item.id !== id) })), 6000);
+  setTimeout(() => dismissToast(id), tone === "error" ? 4000 : 2500);
+}
+
+export function dismissToast(id: number): void {
+  set((state) => ({ toasts: state.toasts.filter((item) => item.id !== id) }));
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -633,16 +637,29 @@ export async function continueStored(
 }
 
 async function resumeSession(nativeId: string, prompt?: string): Promise<SessionInfo | null> {
+  // The message shows at once, while the takeover launches the agent.
+  if (prompt) showPendingPrompt(nativeId, prompt);
   try {
     const params: Record<string, unknown> = { workspace_id: WORKSPACE, session_id: nativeId };
     if (prompt) params.prompt = prompt;
     const { session } = await request<{ session: SessionInfo }>("session.resume", params, 120_000);
-    set((state) => ({ sessions: [session, ...state.sessions.filter((item) => item.session_id !== session.session_id)] }));
+    // The managed session reads the same native transcript under a new id; carrying over what is
+    // on screen avoids reloading it from the start.
+    set((state) => {
+      const carried = state.transcripts[nativeId];
+      const existing = state.transcripts[session.session_id];
+      return {
+        sessions: [session, ...state.sessions.filter((item) => item.session_id !== session.session_id)],
+        transcripts: carried && !existing?.loaded ? { ...state.transcripts, [session.session_id]: { ...carried, live: [...carried.live] } } : state.transcripts,
+      };
+    });
     if (prompt) showPendingPrompt(session.session_id, prompt);
+    updateTranscript(nativeId, (transcript) => ({ live: transcript.live.filter((entry) => !(entry.type === "user" && entry.pending)) }));
     open({ type: "session", sessionId: session.session_id });
     scheduleCatalog();
     return session;
   } catch (error) {
+    updateTranscript(nativeId, (transcript) => ({ live: transcript.live.filter((entry) => !(entry.type === "user" && entry.pending)) }));
     toast(error instanceof RpcError && error.code === 303 ? "这个会话正在另一个程序里运行，先在那边关掉它再接着聊" : `接管失败：${message(error)}`);
     return null;
   }
@@ -698,4 +715,38 @@ export async function setModel(sessionId: string, change: { model?: string; effo
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------- attachments
+
+export interface DirectoryListing {
+  path: string;
+  entries: { name: string; is_dir: boolean }[];
+}
+
+/** Lists a directory on the machine: the home directory and bound project folders. */
+export async function readDirectory(path: string): Promise<DirectoryListing> {
+  return request<DirectoryListing>("fs.readDirectory", { workspace_id: WORKSPACE, path });
+}
+
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+/** Saves a file from this device into the project on the machine and returns its path there. */
+export async function uploadFile(projectId: string, file: File): Promise<string> {
+  if (file.size > MAX_UPLOAD_BYTES) throw new Error(`${file.name} 超过 5 MB`);
+  const base64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");
+    reader.onerror = () => reject(reader.error ?? new Error("读取文件失败"));
+    reader.readAsDataURL(file);
+  });
+  const name = file.name || `pasted-${Date.now()}.png`;
+  const { path } = await request<{ path: string }>("fs.writeUpload", { workspace_id: WORKSPACE, project_id: projectId, name, base64 }, 120_000);
+  return path;
+}
+
+/** Appends attached file paths to a message in a form both agents follow. */
+export function withAttachments(text: string, paths: string[]): string {
+  if (!paths.length) return text;
+  return `${text}\n\n附件（电脑上的文件，请直接读取）：\n${paths.map((path) => `- ${displayPath(path)}`).join("\n")}`;
 }

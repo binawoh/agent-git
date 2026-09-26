@@ -84,7 +84,12 @@ export function NewSession({ projectId }: { projectId: string | null }) {
         {selected && <p className="muted">{displayPath(selected.local_path)}</p>}
       </div>
       <div className="composer-wrap">
-        <Composer placeholder="描述你要做的事…" disabled={peerState !== "online" || !project} onSubmit={submit}>
+        <Composer
+          placeholder="描述你要做的事…"
+          disabled={peerState !== "online" || !project}
+          onSubmit={submit}
+          attach={selected ? { projectId: selected.project_id, root: selected.local_path } : null}
+        >
           <Picker
             title="项目"
             value={project}

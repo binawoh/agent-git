@@ -1,9 +1,9 @@
 import { LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { continueStored, interrupt, loadHistory, loadModels, send, sessionModel, setModel, setPermissionMode, useStore } from "../store";
+import { continueStored, interrupt, loadHistory, loadModels, projectOfLocal, send, sessionModel, setModel, setPermissionMode, useStore } from "../store";
 import { emptyTranscript } from "../transcript";
 import type { EffortChoice, LocalSession, ModelChoice, ModelState, SessionInfo } from "../types";
-import { Composer, Picker } from "./Composer";
+import { Composer, Picker, type AttachTarget } from "./Composer";
 import { blocks, EntryView } from "./Entries";
 import { effortName, permissionName, runtimeName } from "./labels";
 
@@ -98,12 +98,15 @@ function LocalComposer({ session }: { session: LocalSession }) {
     models[0];
   const efforts = chosen?.efforts ?? [];
   const modes = capability?.permission_modes ?? [];
+  const project = projectOfLocal(session);
+  const attach: AttachTarget | null = project ? { projectId: project.project_id, root: project.local_path } : null;
 
   return (
     <div className="composer-wrap">
       <Composer
         placeholder={`接着这个会话发消息给 ${runtimeName[session.runtime] ?? session.runtime}…`}
         draftKey={session.runtime_session_id}
+        attach={attach}
         onSubmit={(text) =>
           continueStored(session.runtime_session_id, text, {
             model: model || undefined,
@@ -152,7 +155,11 @@ function effortOptions(efforts: EffortChoice[] | undefined, current: string | nu
 
 function SessionComposer({ session, running }: { session: SessionInfo; running: boolean }) {
   const capability = useStore((state) => state.description?.capabilities?.[session.runtime]);
+  const project = useStore((state) => state.projects.find((item) => item.project_id === session.project_id));
+  const attach: AttachTarget | null = project ? { projectId: project.project_id, root: project.local_path } : null;
   const [state, setState] = useState<ModelState>({});
+  // The executor refuses model changes during a turn; a change made then waits for its end.
+  const [queued, setQueued] = useState<{ model?: string; effort?: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -175,8 +182,22 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
   if (model && !modelOptions.some((option) => option.value === model)) modelOptions.unshift({ value: model, label: model });
   if (modelOptions.length === 0) modelOptions.push({ value: "", label: "默认模型" });
 
+  useEffect(() => {
+    if (running || !queued) return;
+    setQueued(null);
+    void apply(queued);
+  }, [running, queued]);
+
   async function change(update: { model?: string; effort?: string }) {
     setState((current) => ({ ...current, ...update }));
+    if (running) {
+      setQueued((current) => ({ ...(current ?? {}), ...update, ...(update.model !== undefined && update.effort === undefined ? { effort: undefined } : {}) }));
+      return;
+    }
+    await apply(update);
+  }
+
+  async function apply(update: { model?: string; effort?: string }) {
     const result = await setModel(session.session_id, update);
     // A different model can offer different efforts; read back what now applies.
     const fresh = result && result.efforts !== undefined ? result : await sessionModel(session.session_id);
@@ -191,10 +212,12 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
         draftKey={session.session_id}
         onSubmit={(text) => send(session.session_id, text)}
         onStop={() => void interrupt(session.session_id)}
+        attach={attach}
       >
         <span className="picker static" title="Agent（会话创建后不能更换）">
           {runtimeName[session.runtime] ?? session.runtime}
         </span>
+        {queued && <span className="pending-note">本轮结束后生效</span>}
         <Picker title="模型" value={model ?? ""} disabled={models.length === 0} options={modelOptions} onChange={(value) => void change({ model: value })} />
         <Picker
           title="思考强度"
