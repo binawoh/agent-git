@@ -72,7 +72,7 @@ export function SessionView({ sessionKey, local }: { sessionKey: string; local?:
         <div className="composer-wrap">
           <div className="readonly-bar">
             <Eye size={16} />
-            <span>这个会话正在电脑上的其他程序里运行，这里只能查看，每 4 秒自动刷新。关掉那边之后就能在这里接着聊。</span>
+            <ReleaseNote modifiedAt={localInfo.modified_at} />
           </div>
         </div>
       ) : localInfo ? (
@@ -256,5 +256,26 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
         }
       />
     </div>
+  );
+}
+
+/** Window of silence after which the executor treats a transcript as released; it matches the
+ *  executor's own test, so the countdown ends when a takeover would be accepted. */
+const RELEASE_SECONDS = 90;
+
+function ReleaseNote({ modifiedAt }: { modifiedAt: string }) {
+  const now = useTicking(true);
+  const written = Date.parse(modifiedAt);
+  const quiet = Number.isNaN(written) ? 0 : Math.max(0, Math.floor((now - written) / 1000));
+  const left = Math.max(0, RELEASE_SECONDS - quiet);
+  return (
+    <span>
+      这个会话正在电脑上的其他程序里运行，这里只能查看，内容每 4 秒刷新。
+      {quiet < 5
+        ? "它刚刚还在写入。"
+        : left > 0
+          ? `最后一次写入在 ${quiet} 秒前，再没有写入的话约 ${left} 秒后就能在这里接着聊。`
+          : "已经停止写入，马上就能接着聊。"}
+    </span>
   );
 }

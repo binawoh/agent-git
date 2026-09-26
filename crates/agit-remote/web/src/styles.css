@@ -2468,3 +2468,66 @@ textarea:focus-visible {
     display: none;
   }
 }
+
+/* ---------------------------------------------------------------- attachments in messages */
+
+.user-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.attached-image {
+  display: block;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--code);
+  cursor: zoom-in;
+}
+
+.attached-image img {
+  display: block;
+  max-width: min(280px, 70vw);
+  max-height: 220px;
+  object-fit: contain;
+}
+
+.attached-image.loading {
+  width: 120px;
+  height: 90px;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.attached-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.75);
+  cursor: zoom-out;
+}
+
+.image-viewer img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+}

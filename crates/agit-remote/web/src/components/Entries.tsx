@@ -26,6 +26,7 @@ import { decide } from "../store";
 import type { Entry } from "../transcript";
 import { MarkdownText } from "./Markdown";
 import { commandOf, diffOf, parseInput, shortPath, stepKind, stepVerb, summarize, todosOf, type Diff, type StepKind, type Todo } from "./steps";
+import { UserMessage } from "./UserMessage";
 
 type ToolEntry = Extract<Entry, { type: "tool" }>;
 type ReasoningEntry = Extract<Entry, { type: "reasoning" }>;
@@ -52,11 +53,7 @@ export function blocks(entries: Entry[]): Block[] {
 export function EntryView({ block, sessionId, live }: { block: Block; sessionId: string; live?: boolean }) {
   switch (block.type) {
     case "user":
-      return (
-        <div className={`user-message ${block.pending ? "pending" : ""}`}>
-          <div className="user-bubble">{block.text}</div>
-        </div>
-      );
+      return <UserMessage text={block.text} pending={block.pending} />;
     case "assistant":
       return (
         <div className="assistant">

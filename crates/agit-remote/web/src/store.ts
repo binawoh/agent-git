@@ -469,7 +469,11 @@ async function subscribe(sessionId: string): Promise<void> {
 setInterval(() => {
   const { view, local, target } = get();
   if (!target || view.type !== "local" || document.visibilityState !== "visible") return;
-  if (local.find((session) => session.runtime_session_id === view.nativeId)?.likely_active) void loadHistory(view.nativeId);
+  if (!local.find((session) => session.runtime_session_id === view.nativeId)?.likely_active) return;
+  void loadHistory(view.nativeId);
+  // The executor releases a session once its transcript stops changing; checking the listing
+  // at the same pace shows the release as soon as the executor would accept a takeover.
+  void refreshCatalog();
 }, 4000);
 
 // ---------------------------------------------------------------------------- live events
@@ -773,4 +777,35 @@ export async function uploadFile(projectId: string, file: File): Promise<string>
 export function withAttachments(text: string, paths: string[]): string {
   if (!paths.length) return text;
   return `${text}\n\n附件（电脑上的文件，请直接读取）：\n${paths.map((path) => `- ${displayPath(path)}`).join("\n")}`;
+}
+
+const ATTACHMENT_HEADING = "附件（电脑上的文件，请直接读取）：";
+
+/** Splits a message written by `withAttachments` back into its text and attached paths. */
+export function splitAttachments(message: string): { text: string; paths: string[] } {
+  const at = message.lastIndexOf(`\n\n${ATTACHMENT_HEADING}\n`);
+  if (at < 0) return { text: message, paths: [] };
+  const paths = message
+    .slice(at + ATTACHMENT_HEADING.length + 3)
+    .split("\n")
+    .map((line) => line.replace(/^- /, "").trim())
+    .filter(Boolean);
+  return { text: message.slice(0, at), paths };
+}
+
+const imageCache = new Map<string, Promise<string | null>>();
+
+/** A data URL for an image file on the machine, or null when it cannot be previewed. */
+export function readImage(path: string): Promise<string | null> {
+  let cached = imageCache.get(path);
+  if (!cached) {
+    cached = request<{ mime: string; base64?: string | null; truncated?: boolean }>("fs.readFile", { workspace_id: WORKSPACE, path })
+      .then((file) => (file.base64 && !file.truncated && file.mime.startsWith("image/") ? `data:${file.mime};base64,${file.base64}` : null))
+      .catch(() => null);
+    imageCache.set(path, cached);
+    void cached.then((url) => {
+      if (url === null) imageCache.delete(path);
+    });
+  }
+  return cached;
 }
