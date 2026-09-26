@@ -140,6 +140,16 @@ export interface Frame {
   stream?: string;
 }
 
+/** `runtime.usage`: plan usage as the machine's agent reports it for its account, asked of a
+ *  short-lived agent, and for Claude Code the context window of the model asked about. */
+export interface RuntimeUsage {
+  runtime: string;
+  observed_at: number;
+  usage: Record<string, any>;
+  model?: string | null;
+  context_window?: number | null;
+}
+
 export interface EffortChoice {
   id: string;
   name?: string;

@@ -16,6 +16,7 @@ import type {
   PeerState,
   PeerStatus,
   Project,
+  RuntimeUsage,
   SessionInfo,
   Target,
 } from "./types";
@@ -717,6 +718,16 @@ export async function loadModels(runtime: string, cwd?: string): Promise<ModelCh
     return models;
   } catch {
     return [];
+  }
+}
+
+/** Plan usage from the machine's agent, and for Claude Code the context window of `model`.
+ *  Each call starts a short-lived agent on the machine. */
+export async function runtimeUsage(runtime: string, model?: string | null): Promise<RuntimeUsage | null> {
+  try {
+    return await request<RuntimeUsage>("runtime.usage", model ? { runtime, model } : { runtime }, 40_000);
+  } catch {
+    return null;
   }
 }
 

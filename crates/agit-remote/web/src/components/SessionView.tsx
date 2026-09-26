@@ -4,7 +4,7 @@ import { continueStored, interrupt, loadHistory, loadModels, nativeRecords, proj
 import { emptyTranscript } from "../transcript";
 import type { LocalSession, ModelChoice, ModelState, SessionInfo } from "../types";
 import { Composer, type AttachTarget, type SlashCommand } from "./Composer";
-import { commandCatalog, contextUse, extensionInfo, lastNative, newestLimits, planUsage, recordedSettings, rememberLimits, rememberNative, slashCommands, UsageRing, type RecordedSettings } from "./SessionInfo";
+import { commandCatalog, contextUse, extensionInfo, knownWindow, lastNative, recordedSettings, rememberNative, slashCommands, UsageRing, useAgentUsage, type RecordedSettings } from "./SessionInfo";
 import { blocks, EntryView } from "./Entries";
 import { effortName, runtimeName } from "./labels";
 import { EffortPicker, effortOptions, ModelPicker, modelOptions, ModePicker } from "./Pickers";
@@ -113,7 +113,8 @@ function LocalComposer({ session }: { session: LocalSession }) {
   const native = useMemo(() => lastNative(session.runtime), [session.runtime]);
   const catalog = useMemo(() => commandCatalog(capability), [capability]);
   const commands = slashCommands(native.commands, null, catalog);
-  const usage = planUsage(session.runtime, newestLimits(session.runtime, null));
+  const agentUsage = useAgentUsage(session.runtime, recorded.model, null);
+  const context = knownWindow(recorded.model, recorded.context);
 
   // Read again when the transcript grows, so changes made by another program show up too.
   useEffect(() => {
@@ -184,7 +185,7 @@ function LocalComposer({ session }: { session: LocalSession }) {
               options={[{ value: "", label: ownEffort ? `沿用原强度（${ownEffort}）` : "沿用原强度", description: "保持这个会话原来的思考强度" }, ...effortOptions(efforts)]}
               onChange={setEffort}
             />
-            {(recorded.context || usage) && <UsageRing context={recorded.context ?? null} usage={usage} />}
+            {(context || agentUsage.usage) && <UsageRing context={context} usage={agentUsage.usage} refreshing={agentUsage.refreshing} onOpen={agentUsage.refresh} />}
           </>
         }
       />
@@ -233,10 +234,9 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
   const catalog = useMemo(() => commandCatalog(capability), [capability]);
   const commands = slashCommands(liveCommands, state.native?.slash_commands, catalog);
   const extensions = extensionInfo(state);
-  const context = contextUse(state) ?? recorded.context ?? null;
-  const usage = planUsage(session.runtime, newestLimits(session.runtime, state.rate_limits));
+  const context = knownWindow(state.model ?? recorded.model, contextUse(state) ?? recorded.context ?? null);
+  const agentUsage = useAgentUsage(session.runtime, state.model ?? recorded.model, state.rate_limits);
   useEffect(() => rememberNative(session.runtime, { commands, extensions }), [session.runtime, state, liveCommands, catalog]);
-  useEffect(() => rememberLimits(session.runtime, state.rate_limits), [session.runtime, state.rate_limits]);
 
   /** Codex runs its commands natively; Claude Code reads a `/name` message itself. */
   function submit(text: string) {
@@ -313,7 +313,7 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
               note={note}
               onChange={(value) => void change({ effort: value })}
             />
-            {(context || usage) && <UsageRing context={context} usage={usage} />}
+            {(context || agentUsage.usage) && <UsageRing context={context} usage={agentUsage.usage} refreshing={agentUsage.refreshing} onOpen={agentUsage.refresh} />}
           </>
         }
       />
