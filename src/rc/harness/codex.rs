@@ -60,6 +60,12 @@ impl std::fmt::Display for RequestIdExhausted {
 
 impl std::error::Error for RequestIdExhausted {}
 
+/// Plan limits as viewers read them: the app server's snapshot, kept as stated, and the Unix
+/// time agit received it.
+fn rate_limit_report(snapshot: &Value) -> Value {
+    json!({"observed_at": chrono::Utc::now().timestamp(), "info": snapshot})
+}
+
 pub fn capability() -> RuntimeCapability {
     RuntimeCapability {
         runtime: "codex".into(),
@@ -322,6 +328,8 @@ pub struct CodexDriver {
     started: bool,
     command_requests: std::collections::HashSet<i64>,
     token_usage: Option<Value>,
+    /// The account's plan limits as the app server last reported them, and when agit saw them.
+    rate_limits: Option<Value>,
     guardian_denials: guardian::Denials,
     /// The handshake-chain request still awaiting its response: `(request id, method name)`.
     ///
@@ -408,6 +416,7 @@ impl CodexDriver {
             opening_ready: None,
             command_requests: Default::default(),
             token_usage: None,
+            rate_limits: None,
             guardian_denials: Default::default(),
             mode: spec.effective_mode(),
             pending_mode: None,
@@ -817,7 +826,7 @@ impl CodexDriver {
             json!({"model":self.model,"effort":self.effort,"effort_known":self.effort.is_some(),
             "pending":self.pending_model.as_ref().map(|p| json!({"model":p.0,"effort":p.1})),
             "models":self.model_catalog,"efforts":efforts,"applied":if self.pending_model.is_some() {"next_turn"} else {"immediate"},
-            "token_usage":self.token_usage,
+            "token_usage":self.token_usage,"rate_limits":self.rate_limits,
             "capabilities":{"model":true,"effort":efforts.as_array().is_some_and(|v| !v.is_empty()),
                 "reset_model":self.default_model.as_deref().is_some_and(|id| super::models::selected(&self.model_catalog, Some(id)).is_some()),
                 "reset_effort":selected.is_some_and(|v| v["default_effort"].is_string())}}),
@@ -1398,6 +1407,10 @@ impl CodexDriver {
                 self.token_usage = Some(params["tokenUsage"].clone());
                 None
             }
+            "account/rateLimits/updated" if params["rateLimits"].is_object() => {
+                self.rate_limits = Some(rate_limit_report(&params["rateLimits"]));
+                None
+            }
             "thread/goal/updated" if params["threadId"].as_str() == self.thread_id.as_deref() => {
                 Some(HarnessEvent::GoalUpdated {
                     goal: params["goal"].clone(),
@@ -1762,6 +1775,7 @@ impl CodexDriver {
             opening_ready: None,
             command_requests: Default::default(),
             token_usage: None,
+            rate_limits: None,
             guardian_denials: Default::default(),
             mode: PermissionMode::Default,
             pending_mode: None,
@@ -1883,6 +1897,7 @@ mod tests {
             opening_ready: None,
             command_requests: Default::default(),
             token_usage: None,
+            rate_limits: None,
             guardian_denials: Default::default(),
             mode: PermissionMode::Default,
             pending_mode: None,

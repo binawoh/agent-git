@@ -200,7 +200,12 @@ impl CodexDriver {
                 .command_request("account/rateLimits/read", json!({}))
                 .await
             {
-                Ok(limits) => result["limits"] = limits,
+                Ok(limits) => {
+                    if limits["rateLimits"].is_object() {
+                        self.rate_limits = Some(rate_limit_report(&limits["rateLimits"]));
+                    }
+                    result["limits"] = limits;
+                }
                 Err(_) => result["limitsUnavailable"] = json!(true),
             }
             return Ok(result);

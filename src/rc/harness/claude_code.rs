@@ -312,6 +312,9 @@ pub struct ClaudeCodeDriver {
     native_info: Value,
     /// Context use of the latest model call, and the model's context window once a turn reports it.
     context: Value,
+    /// The account's plan usage as the CLI last reported it with a model call, and when agit
+    /// saw that report; the CLI reports nothing between calls, so a viewer needs its age.
+    rate_limits: Value,
     /// Set once the first `system/init` arrives.
     ready_sent: bool,
     /// Slash commands the CLI advertised in its handshake. Surfaced to viewers
@@ -439,6 +442,7 @@ impl ClaudeCodeDriver {
             pending_model_request: None,
             native_info: Value::Null,
             context: Value::Null,
+            rate_limits: Value::Null,
             ready_sent: false,
             commands: vec![],
             pushback: Default::default(),
@@ -859,7 +863,7 @@ impl ClaudeCodeDriver {
         Ok(
             json!({"model":self.model,"selected_model":self.model_choice,"effort":self.effort,"effort_known":self.effort_known && self.pending_model_request.is_none(),"pending":null,"settings_unknown":self.pending_model_request.is_some(),
             "models":self.model_catalog,"efforts":efforts,"applied":"immediate",
-            "context":self.context,"native":self.native_info,
+            "context":self.context,"native":self.native_info,"rate_limits":self.rate_limits,
             "capabilities":{"model":self.pending_model_request.is_none(),"effort":self.pending_model_request.is_none() && efforts.as_array().is_some_and(|v| !v.is_empty()),"reset_model":true,"reset_effort":true}}),
         )
     }
@@ -1279,6 +1283,11 @@ impl ClaudeCodeDriver {
             self.native_info = init_summary(v);
         }
         observe_context(&mut self.context, ty, v);
+        if ty == "rate_limit_event"
+            && let Some(report) = rate_limit_report(v, chrono::Utc::now().timestamp())
+        {
+            self.rate_limits = report;
+        }
     }
 
     /// Block index → a stable item id within the current turn.
@@ -1311,6 +1320,7 @@ impl ClaudeCodeDriver {
             pending_model_request: None,
             native_info: Value::Null,
             context: Value::Null,
+            rate_limits: Value::Null,
             mode: PermissionMode::Default,
             ready_sent: true,
             commands: vec![],
@@ -1387,6 +1397,13 @@ fn init_summary(v: &Value) -> Value {
     )
 }
 
+/// A `rate_limit_event` as viewers read it: the CLI's report of the account's plan limits,
+/// kept as stated, and the Unix time agit received it.
+fn rate_limit_report(v: &Value, observed_at: i64) -> Option<Value> {
+    let info = v.get("rate_limit_info").filter(|info| info.is_object())?;
+    Some(json!({"observed_at": observed_at, "info": info}))
+}
+
 /// Tracks context use. `used` is the prompt the model read on the main thread's latest call
 /// (fresh, cached and cache-written input), so it grows with the conversation and shrinks after
 /// a compaction; subagent calls carry a parent tool id and are not the session's context.
@@ -1430,6 +1447,19 @@ fn observe_context(context: &mut Value, ty: &str, v: &Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Viewers show plan usage from the report as the CLI stated it and judge its age by
+    /// `observed_at`. A frame without an info object yields no report, so storing whatever the
+    /// frame holds would erase a usable report with nothing.
+    #[test]
+    fn rate_limit_reports_keep_the_native_info_with_the_time_agit_saw_it() {
+        let frame = json!({"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":0.37,"resetsAt":1790415000}}}});
+        assert_eq!(
+            rate_limit_report(&frame, 42),
+            Some(json!({"observed_at":42,"info":frame["rate_limit_info"]}))
+        );
+        assert_eq!(rate_limit_report(&json!({"type":"rate_limit_event"}), 42), None);
+    }
 
     /// Viewers read context use from the main thread's latest call: a subagent's call must not
     /// replace it, and the window arrives only with the turn's result.
@@ -1647,6 +1677,7 @@ mod tests {
             pending_model_request: None,
             native_info: Value::Null,
             context: Value::Null,
+            rate_limits: Value::Null,
             mode: PermissionMode::Default,
             ready_sent: true,
             commands: vec![],
