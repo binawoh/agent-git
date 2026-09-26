@@ -817,6 +817,7 @@ impl CodexDriver {
             json!({"model":self.model,"effort":self.effort,"effort_known":self.effort.is_some(),
             "pending":self.pending_model.as_ref().map(|p| json!({"model":p.0,"effort":p.1})),
             "models":self.model_catalog,"efforts":efforts,"applied":if self.pending_model.is_some() {"next_turn"} else {"immediate"},
+            "token_usage":self.token_usage,
             "capabilities":{"model":true,"effort":efforts.as_array().is_some_and(|v| !v.is_empty()),
                 "reset_model":self.default_model.as_deref().is_some_and(|id| super::models::selected(&self.model_catalog, Some(id)).is_some()),
                 "reset_effort":selected.is_some_and(|v| v["default_effort"].is_string())}}),

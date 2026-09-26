@@ -307,6 +307,11 @@ pub struct ClaudeCodeDriver {
     model_choice: Option<String>,
     model_catalog: Vec<Value>,
     pending_model_request: Option<(String, Value)>,
+    /// What the CLI reported about itself at start: tools, MCP servers, plugins, skills, agents
+    /// and slash commands, echoed to viewers as the CLI stated them.
+    native_info: Value,
+    /// Context use of the latest model call, and the model's context window once a turn reports it.
+    context: Value,
     /// Set once the first `system/init` arrives.
     ready_sent: bool,
     /// Slash commands the CLI advertised in its handshake. Surfaced to viewers
@@ -432,6 +437,8 @@ impl ClaudeCodeDriver {
             model_choice,
             model_catalog: vec![],
             pending_model_request: None,
+            native_info: Value::Null,
+            context: Value::Null,
             ready_sent: false,
             commands: vec![],
             pushback: Default::default(),
@@ -852,6 +859,7 @@ impl ClaudeCodeDriver {
         Ok(
             json!({"model":self.model,"selected_model":self.model_choice,"effort":self.effort,"effort_known":self.effort_known && self.pending_model_request.is_none(),"pending":null,"settings_unknown":self.pending_model_request.is_some(),
             "models":self.model_catalog,"efforts":efforts,"applied":"immediate",
+            "context":self.context,"native":self.native_info,
             "capabilities":{"model":self.pending_model_request.is_none(),"effort":self.pending_model_request.is_none() && efforts.as_array().is_some_and(|v| !v.is_empty()),"reset_model":true,"reset_effort":true}}),
         )
     }
@@ -898,6 +906,7 @@ impl ClaudeCodeDriver {
     /// keep reading" — heartbeats, token counters, and the like.
     fn classify(&mut self, v: Value) -> Option<HarnessEvent> {
         let ty = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
+        self.observe_session_info(ty, &v);
         match ty {
             "assistant" if v.get("local_command_source").is_some() => {
                 let text = v["message"]["content"]
@@ -1264,6 +1273,14 @@ impl ClaudeCodeDriver {
         }
     }
 
+    /// Keeps what viewers show about the session: its start report and its context use.
+    fn observe_session_info(&mut self, ty: &str, v: &Value) {
+        if ty == "system" && v["subtype"] == "init" {
+            self.native_info = init_summary(v);
+        }
+        observe_context(&mut self.context, ty, v);
+    }
+
     /// Block index → a stable item id within the current turn.
     fn item_id(&self, index: u64) -> String {
         self.stream_items
@@ -1292,6 +1309,8 @@ impl ClaudeCodeDriver {
             model_choice: None,
             model_catalog: vec![],
             pending_model_request: None,
+            native_info: Value::Null,
+            context: Value::Null,
             mode: PermissionMode::Default,
             ready_sent: true,
             commands: vec![],
@@ -1346,9 +1365,97 @@ impl ClaudeCodeDriver {
     }
 }
 
+/// The parts of the CLI's `system/init` report that viewers show, as the CLI stated them.
+fn init_summary(v: &Value) -> Value {
+    const KEEP: [&str; 11] = [
+        "model",
+        "cwd",
+        "tools",
+        "mcp_servers",
+        "slash_commands",
+        "agents",
+        "skills",
+        "plugins",
+        "output_style",
+        "claude_code_version",
+        "apiKeySource",
+    ];
+    Value::Object(
+        KEEP.iter()
+            .filter_map(|key| v.get(*key).map(|value| ((*key).to_owned(), value.clone())))
+            .collect(),
+    )
+}
+
+/// Tracks context use. `used` is the prompt the model read on the main thread's latest call
+/// (fresh, cached and cache-written input), so it grows with the conversation and shrinks after
+/// a compaction; subagent calls carry a parent tool id and are not the session's context.
+/// `window` comes from the turn's `result`.
+fn observe_context(context: &mut Value, ty: &str, v: &Value) {
+    match ty {
+        "assistant" if v.get("parent_tool_use_id").is_none_or(Value::is_null) => {
+            let usage = &v["message"]["usage"];
+            if !usage.is_object() {
+                return;
+            }
+            let read = |key: &str| usage[key].as_u64().unwrap_or(0);
+            if !context.is_object() {
+                *context = json!({});
+            }
+            context["used"] = json!(
+                read("input_tokens")
+                    + read("cache_read_input_tokens")
+                    + read("cache_creation_input_tokens")
+            );
+            context["output"] = json!(read("output_tokens"));
+        }
+        "result" => {
+            let window = v["modelUsage"]
+                .as_object()
+                .into_iter()
+                .flat_map(|models| models.values())
+                .filter_map(|model| model["contextWindow"].as_u64())
+                .max();
+            if let Some(window) = window {
+                if !context.is_object() {
+                    *context = json!({});
+                }
+                context["window"] = json!(window);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Viewers read context use from the main thread's latest call: a subagent's call must not
+    /// replace it, and the window arrives only with the turn's result.
+    #[test]
+    fn context_follows_the_main_thread_and_takes_the_window_from_the_result() {
+        let mut context = Value::Null;
+        let call = |parent: Value, input: u64| {
+            json!({"type":"assistant","parent_tool_use_id":parent,"message":{"usage":{
+                "input_tokens":input,"cache_read_input_tokens":1000,"cache_creation_input_tokens":10,"output_tokens":5}}})
+        };
+        observe_context(&mut context, "assistant", &call(Value::Null, 2));
+        observe_context(&mut context, "assistant", &call(json!("toolu_sub"), 90_000));
+        assert_eq!(context["used"], 1012);
+        assert!(context.get("window").is_none());
+        observe_context(
+            &mut context,
+            "result",
+            &json!({"modelUsage":{"m":{"contextWindow":200000}}}),
+        );
+        assert_eq!(context["window"], 200000);
+        let info = init_summary(
+            &json!({"subtype":"init","mcp_servers":[{"name":"x","status":"connected"}],"session_id":"s"}),
+        );
+        assert_eq!(info["mcp_servers"][0]["name"], "x");
+        assert!(info.get("session_id").is_none());
+    }
 
     /// **A project-scoped command never enters the machine-level catalogue.**
     ///
@@ -1538,6 +1645,8 @@ mod tests {
             model_choice: None,
             model_catalog: vec![],
             pending_model_request: None,
+            native_info: Value::Null,
+            context: Value::Null,
             mode: PermissionMode::Default,
             ready_sent: true,
             commands: vec![],
