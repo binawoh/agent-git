@@ -7,6 +7,7 @@ import { applyFrame, emptyTranscript, mergeHistory, settleLive, type Entry, type
 import type {
   DeviceRow,
   Frame,
+  HistoryItem,
   HistoryPage,
   LocalSession,
   MachineDescription,
@@ -736,6 +737,17 @@ export async function runCommand(sessionId: string, name: string): Promise<void>
     toast(`已执行 /${name}`, "info");
   } catch (error) {
     toast(`/${name} 执行失败：${message(error)}`);
+  }
+}
+
+/** The newest page of a session's native records, unfiltered, for what they say about the
+ *  session's own settings. */
+export async function nativeRecords(key: string): Promise<HistoryItem[]> {
+  try {
+    const page = await request<HistoryPage>("session.history", historyParams(key));
+    return page.items;
+  } catch {
+    return [];
   }
 }
 

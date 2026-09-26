@@ -1,10 +1,10 @@
 import { ArrowDown, Clock, Eye, LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { continueStored, interrupt, loadHistory, loadModels, projectOfLocal, runCommand, send, sessionCommands, sessionModel, setModel, setPermissionMode, useStore } from "../store";
+import { continueStored, interrupt, loadHistory, loadModels, nativeRecords, projectOfLocal, runCommand, send, sessionCommands, sessionModel, setModel, setPermissionMode, useStore } from "../store";
 import { emptyTranscript } from "../transcript";
 import type { LocalSession, ModelChoice, ModelState, SessionInfo } from "../types";
 import { Composer, type AttachTarget, type SlashCommand } from "./Composer";
-import { ContextRing, contextUse, extensionInfo, slashCommands } from "./SessionInfo";
+import { ContextRing, contextUse, extensionInfo, lastNative, recordedSettings, rememberNative, slashCommands, type RecordedSettings } from "./SessionInfo";
 import { blocks, EntryView } from "./Entries";
 import { effortName, runtimeName } from "./labels";
 import { EffortPicker, effortOptions, ModelPicker, modelOptions, ModePicker } from "./Pickers";
@@ -109,6 +109,20 @@ function LocalComposer({ session }: { session: LocalSession }) {
   const [model, setModelChoice] = useState("");
   const [effort, setEffort] = useState("");
   const [mode, setMode] = useState("");
+  const [recorded, setRecorded] = useState<RecordedSettings>({});
+  const native = useMemo(() => lastNative(session.runtime), [session.runtime]);
+
+  // Read again when the transcript grows, so changes made by another program show up too.
+  useEffect(() => {
+    let cancelled = false;
+    if (peerState !== "online") return;
+    void nativeRecords(session.runtime_session_id).then((items) => {
+      if (!cancelled) setRecorded(recordedSettings(items));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [session.runtime_session_id, session.modified_at, peerState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -128,6 +142,8 @@ function LocalComposer({ session }: { session: LocalSession }) {
     models[0];
   const efforts = chosen?.efforts ?? [];
   const modes = capability?.permission_modes ?? [];
+  const ownModel = recorded.model ? models.find((choice) => choice.id === recorded.model)?.name || recorded.model : null;
+  const ownEffort = recorded.effort ? effortName[recorded.effort] ?? recorded.effort : null;
   const project = projectOfLocal(session);
   const attach: AttachTarget | null = project ? { projectId: project.project_id, root: project.local_path } : null;
 
@@ -144,13 +160,15 @@ function LocalComposer({ session }: { session: LocalSession }) {
             permissionMode: mode || undefined,
           })
         }
-        left={<ModePicker keep value={mode} modes={modes} disabled={modes.length === 0} onChange={setMode} />}
+        commands={native.commands}
+        extensions={native.extensions}
+        left={<ModePicker keep kept={recorded.mode} value={mode} modes={modes} disabled={modes.length === 0} onChange={setMode} />}
         right={
           <>
             <ModelPicker
               value={model}
-              display={model ? undefined : "原模型"}
-              options={[{ value: "", label: "沿用原模型", description: "保持这个会话原来的模型" }, ...modelOptions(models)]}
+              display={model ? undefined : ownModel ?? "原模型"}
+              options={[{ value: "", label: ownModel ? `沿用原模型（${ownModel}）` : "沿用原模型", description: "保持这个会话原来的模型" }, ...modelOptions(models)]}
               onChange={(value) => {
                 setModelChoice(value);
                 setEffort("");
@@ -158,11 +176,12 @@ function LocalComposer({ session }: { session: LocalSession }) {
             />
             <EffortPicker
               value={effort}
-              display={effort ? undefined : "原强度"}
+              display={effort ? undefined : ownEffort ?? "原强度"}
               disabled={efforts.length === 0}
-              options={[{ value: "", label: "沿用原强度", description: "保持这个会话原来的思考强度" }, ...effortOptions(efforts)]}
+              options={[{ value: "", label: ownEffort ? `沿用原强度（${ownEffort}）` : "沿用原强度", description: "保持这个会话原来的思考强度" }, ...effortOptions(efforts)]}
               onChange={setEffort}
             />
+            {recorded.context && <ContextRing use={recorded.context} />}
           </>
         }
       />
@@ -178,6 +197,7 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
   // The executor refuses model changes during a turn; a change made then waits for its end.
   const [queued, setQueued] = useState<{ model?: string; effort?: string } | null>(null);
   const [codexCommands, setCodexCommands] = useState<SlashCommand[]>([]);
+  const [recorded, setRecorded] = useState<RecordedSettings>({});
 
   // Context use changes with every turn, so the state is read again whenever a turn ends.
   useEffect(() => {
@@ -185,6 +205,10 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
     let cancelled = false;
     void sessionModel(session.session_id).then((result) => {
       if (!cancelled && result) setState(result);
+    });
+    // Claude Code does not report its effort; its records name the effort of each reply.
+    void nativeRecords(session.session_id).then((items) => {
+      if (!cancelled) setRecorded(recordedSettings(items));
     });
     return () => {
       cancelled = true;
@@ -203,7 +227,9 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
   }, [session.session_id, session.runtime]);
 
   const commands = slashCommands(state, codexCommands);
-  const context = contextUse(state);
+  const extensions = extensionInfo(state);
+  const context = contextUse(state) ?? recorded.context ?? null;
+  useEffect(() => rememberNative(session.runtime, { commands, extensions }), [session.runtime, state, codexCommands]);
 
   /** Codex runs its commands natively; Claude Code reads a `/name` message itself. */
   function submit(text: string) {
@@ -223,6 +249,7 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
   if (model && !modelChoices.some((option) => option.value === model)) modelChoices.unshift({ value: model, label: model });
   if (modelChoices.length === 0) modelChoices.push({ value: "", label: "默认模型" });
   const effort = state.effort ?? "";
+  const ownEffort = !effort && recorded.effort ? effortName[recorded.effort] ?? recorded.effort : null;
   const effortChoices = effortOptions(efforts);
   if (effort && !effortChoices.some((option) => option.value === effort)) effortChoices.unshift({ value: effort, label: effortName[effort] ?? effort });
   if (!effort) effortChoices.unshift({ value: "", label: "默认强度" });
@@ -260,7 +287,7 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
         onStop={() => void interrupt(session.session_id)}
         attach={attach}
         commands={commands}
-        extensions={extensionInfo(state)}
+        extensions={extensions}
         left={<ModePicker value={mode} modes={modes} disabled={modes.length < 2} onChange={(value) => void setPermissionMode(session.session_id, value)} />}
         right={
           <>
@@ -273,7 +300,7 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
             <ModelPicker value={model ?? ""} options={modelChoices} disabled={models.length === 0} note={note} onChange={(value) => void change({ model: value })} />
             <EffortPicker
               value={effort}
-              display={effort ? undefined : "默认"}
+              display={effort ? undefined : ownEffort ?? "默认"}
               options={effortChoices}
               disabled={!efforts?.length}
               note={note}

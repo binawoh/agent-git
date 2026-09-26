@@ -22,21 +22,22 @@ export function modeIcon(mode: string, size = 15): ReactNode {
 }
 
 /** The permission mode button. With `keep`, the empty value leaves a stored session's own mode. */
-export function ModePicker(props: { value: string; modes: string[]; onChange: (value: string) => void; disabled?: boolean; keep?: boolean }) {
+export function ModePicker(props: { value: string; modes: string[]; onChange: (value: string) => void; disabled?: boolean; keep?: boolean; kept?: string }) {
   const options: MenuOption[] = props.modes.map((mode) => ({
     value: mode,
     label: permissionName[mode] ?? mode,
     description: permissionHint[mode],
     icon: modeIcon(mode),
   }));
-  if (props.keep) options.unshift({ value: "", label: "沿用原权限", description: "保持这个会话原来的权限模式", icon: modeIcon("") });
+  const kept = props.kept ? permissionName[props.kept] ?? props.kept : null;
+  if (props.keep) options.unshift({ value: "", label: kept ? `沿用原权限（${kept}）` : "沿用原权限", description: "保持这个会话原来的权限模式", icon: modeIcon(props.kept ?? "") });
   return (
     <MenuPicker
-      className={`mode-picker ${props.value === "bypass" ? "danger" : ""}`}
+      className={`mode-picker ${(props.value || props.kept) === "bypass" ? "danger" : ""}`}
       title="权限模式"
-      icon={modeIcon(props.value)}
+      icon={modeIcon(props.value || props.kept || "")}
       value={props.value}
-      display={props.keep && !props.value ? "原权限" : undefined}
+      display={props.keep && !props.value ? kept ?? "原权限" : undefined}
       options={options}
       disabled={props.disabled}
       onChange={props.onChange}
