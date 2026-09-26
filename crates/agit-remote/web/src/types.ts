@@ -162,4 +162,10 @@ export interface ModelState {
   effort?: string | null;
   models?: ModelChoice[];
   efforts?: EffortChoice[];
+  /** Claude Code: prompt size of the latest call and, once a turn reports it, the window. */
+  context?: { used?: number; window?: number; output?: number } | null;
+  /** Claude Code: the CLI's start report (tools, MCP servers, plugins, slash commands...). */
+  native?: Record<string, any> | null;
+  /** Codex: the thread's latest token usage as the app-server reported it. */
+  token_usage?: Record<string, any> | null;
 }

@@ -1,4 +1,4 @@
-import { ArrowUp, File as FileIcon, FolderOpen, Image as ImageIcon, LoaderCircle, Plus, Square, Upload, X } from "lucide-react";
+import { ArrowUp, ChevronLeft, ChevronRight, File as FileIcon, FolderOpen, Image as ImageIcon, LoaderCircle, Paperclip, Plug, Plus, Server, Slash, Square, X } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { readImage, toast, uploadFile, withAttachments } from "../store";
 import { FilePicker } from "./FilePicker";
@@ -17,6 +17,18 @@ interface Attachment {
   path: string | null;
   /** A local object URL for an image picked on this device, shown before upload finishes. */
   preview?: string;
+}
+
+/** A command the agent accepts when a message starts with `/name`. */
+export interface SlashCommand {
+  name: string;
+  description?: string;
+}
+
+/** What the agent reported about its extensions, listed from the attachment menu. */
+export interface ExtensionInfo {
+  mcp: { name: string; status?: string }[];
+  plugins: { name: string; detail?: string }[];
 }
 
 /** Enter sends on devices with a keyboard; an IME composition never sends (it confirms a
@@ -39,16 +51,40 @@ export function Composer(props: {
   left?: ReactNode;
   right?: ReactNode;
   footer?: ReactNode;
+  commands?: SlashCommand[];
+  extensions?: ExtensionInfo | null;
 }) {
   const storageKey = props.draftKey ? `agit.draft.${props.draftKey}` : null;
   const [text, setText] = useState(() => (storageKey ? (localStorage.getItem(storageKey) ?? "") : ""));
   const [sending, setSending] = useState(false);
   const [files, setFiles] = useState<Attachment[]>([]);
   const [browsing, setBrowsing] = useState(false);
+  const [panel, setPanel] = useState<"mcp" | "plugins" | null>(null);
   const [dragging, setDragging] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const uploading = files.some((file) => file.path === null);
+  const slashQuery = /^\/([^\s]*)$/.exec(text)?.[1];
+  const slashMatches = slashQuery === undefined ? [] : (props.commands ?? []).filter((command) => command.name.toLowerCase().includes(slashQuery.toLowerCase())).slice(0, 50);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
+  const slashOpen = slashMatches.length > 0 && !slashDismissed;
+  useEffect(() => {
+    setSlashIndex(0);
+    if (slashQuery === undefined) setSlashDismissed(false);
+  }, [slashQuery]);
+
+  function pickCommand(command: SlashCommand) {
+    setText(`/${command.name} `);
+    setSlashDismissed(true);
+    area.current?.focus();
+  }
+
+  function startSlash() {
+    setText("/");
+    setSlashDismissed(false);
+    area.current?.focus();
+  }
 
   async function upload(list: File[]) {
     const target = props.attach;
@@ -103,7 +139,10 @@ export function Composer(props: {
     const element = area.current;
     if (!element) return;
     element.style.height = "auto";
-    element.style.height = `${Math.min(element.scrollHeight, window.innerHeight * 0.4)}px`;
+    const cap = window.innerHeight * 0.4;
+    element.style.height = `${Math.min(element.scrollHeight, cap)}px`;
+    // A scrollbar appears only once the text outgrows the box.
+    element.classList.toggle("capped", element.scrollHeight > cap);
   }, [text]);
 
   async function submit() {
@@ -122,6 +161,24 @@ export function Composer(props: {
   }
 
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (slashOpen && !event.nativeEvent.isComposing) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        setSlashIndex((index) => (index + step + slashMatches.length) % slashMatches.length);
+        return;
+      }
+      if (event.key === "Tab" || (event.key === "Enter" && !event.shiftKey && slashMatches[slashIndex]?.name !== slashQuery)) {
+        event.preventDefault();
+        pickCommand(slashMatches[slashIndex]);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSlashDismissed(true);
+        return;
+      }
+    }
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229 || coarsePointer) return;
     event.preventDefault();
     void submit();
@@ -161,6 +218,26 @@ export function Composer(props: {
             ))}
           </div>
         )}
+        {slashOpen && (
+          <div className="slash-menu" role="listbox" aria-label="斜杠命令">
+            {slashMatches.map((command, index) => (
+              <button
+                type="button"
+                key={command.name}
+                role="option"
+                aria-selected={index === slashIndex}
+                className={`slash-option ${index === slashIndex ? "active" : ""}`}
+                onMouseEnter={() => setSlashIndex(index)}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => pickCommand(command)}
+              >
+                <span className="slash-name">/{command.name}</span>
+                {command.description && <span className="slash-description">{command.description}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="composer-input">
         <textarea
           onPaste={paste}
           ref={area}
@@ -171,7 +248,18 @@ export function Composer(props: {
           onChange={(event) => setText(event.target.value)}
           onKeyDown={keyDown}
         />
-        <div className="composer-toolbar">
+          {props.running && props.onStop && !canSend ? (
+              <button type="button" className="send-button stop" title="中断" aria-label="中断" onClick={props.onStop}>
+                <Square size={11} fill="currentColor" strokeWidth={0} />
+              </button>
+            ) : (
+              <button type="button" className={`send-button ${canSend ? "ready" : ""}`} title="发送" aria-label="发送" disabled={!canSend} onClick={() => void submit()}>
+                <ArrowUp size={17} strokeWidth={2.4} />
+              </button>
+            )}
+        </div>
+      </div>
+      <div className="composer-toolbar">
           <div className="toolbar-side">
             {props.attach && (
               <ActionMenu
@@ -182,8 +270,11 @@ export function Composer(props: {
                   </button>
                 )}
                 items={[
+                  { label: "添加文件或照片", description: "从这台设备上传，最大 5 MB", icon: <Paperclip size={15} />, onSelect: () => input.current?.click() },
                   { label: "从电脑选择文件", description: "直接引用电脑上的文件", icon: <FolderOpen size={15} />, onSelect: () => setBrowsing(true) },
-                  { label: "从这台设备上传", description: "上传到项目文件夹，最大 5 MB", icon: <Upload size={15} />, onSelect: () => input.current?.click() },
+                  ...(props.commands?.length ? [{ label: "斜杠命令", icon: <Slash size={15} />, onSelect: startSlash }] : []),
+                  ...(props.extensions ? [{ label: "MCP 服务器", icon: <Server size={15} />, onSelect: () => setPanel("mcp") }] : []),
+                  ...(props.extensions ? [{ label: "插件", icon: <Plug size={15} />, onSelect: () => setPanel("plugins") }] : []),
                 ]}
               />
             )}
@@ -201,18 +292,9 @@ export function Composer(props: {
           </div>
           <div className="toolbar-side right">
             {props.right}
-            {props.running && props.onStop && !canSend ? (
-              <button type="button" className="send-button stop" title="中断" aria-label="中断" onClick={props.onStop}>
-                <Square size={11} fill="currentColor" strokeWidth={0} />
-              </button>
-            ) : (
-              <button type="button" className={`send-button ${canSend ? "ready" : ""}`} title="发送" aria-label="发送" disabled={!canSend} onClick={() => void submit()}>
-                <ArrowUp size={17} strokeWidth={2.4} />
-              </button>
-            )}
           </div>
         </div>
-      </div>
+      {panel && props.extensions && <ExtensionPanel kind={panel} info={props.extensions} onClose={() => setPanel(null)} />}
       {props.footer && <div className="composer-footer">{props.footer}</div>}
       {browsing && props.attach && (
         <FilePicker
@@ -258,4 +340,40 @@ function Thumbnail({ file }: { file: Attachment }) {
       )}
     </>
   );
+}
+
+/** The agent's MCP servers or plugins, as it reported them when it started. */
+function ExtensionPanel({ kind, info, onClose }: { kind: "mcp" | "plugins"; info: ExtensionInfo; onClose: () => void }) {
+  const rows = kind === "mcp" ? info.mcp.map((server) => ({ name: server.name, detail: server.status })) : info.plugins;
+  return (
+    <div className="dialog-backdrop" onClick={onClose}>
+      <div className="dialog extension-panel" onClick={(event) => event.stopPropagation()}>
+        <h3>
+          <button type="button" className="icon-button small" title="关闭" onClick={onClose}>
+            <ChevronLeft size={16} />
+          </button>
+          {kind === "mcp" ? "MCP 服务器" : "插件"}
+        </h3>
+        {rows.length === 0 ? (
+          <p className="muted">{kind === "mcp" ? "这个会话没有连接 MCP 服务器。" : "这个会话没有启用插件。"}</p>
+        ) : (
+          <ul className="extension-list">
+            {rows.map((row) => (
+              <li key={row.name}>
+                <span className="extension-name">{row.name}</span>
+                {row.detail && <span className={`extension-status ${row.detail}`}>{statusText(row.detail)}</span>}
+                <ChevronRight size={14} className="extension-chevron" />
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="muted extension-note">以 agent 启动时报告的为准。</p>
+      </div>
+    </div>
+  );
+}
+
+function statusText(status: string): string {
+  const names: Record<string, string> = { connected: "已连接", failed: "连接失败", pending: "连接中", "needs-auth": "需要授权", disabled: "已停用" };
+  return names[status] ?? status;
 }

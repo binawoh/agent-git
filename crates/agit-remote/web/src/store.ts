@@ -719,6 +719,26 @@ export async function loadModels(runtime: string, cwd?: string): Promise<ModelCh
   }
 }
 
+/** Commands a Codex session runs natively; Claude Code lists its own in its start report. */
+export async function sessionCommands(sessionId: string): Promise<{ name: string; description?: string }[]> {
+  try {
+    const { commands } = await request<{ commands: { name: string; description?: string }[] }>("session.commands", { session_id: sessionId });
+    return commands ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Runs a Codex native command such as `compact`; its outcome is reported in the session. */
+export async function runCommand(sessionId: string, name: string): Promise<void> {
+  try {
+    await request("session.command", { session_id: sessionId, name });
+    toast(`已执行 /${name}`, "info");
+  } catch (error) {
+    toast(`/${name} 执行失败：${message(error)}`);
+  }
+}
+
 export async function sessionModel(sessionId: string): Promise<ModelState | null> {
   try {
     return await request<ModelState>("session.model", { session_id: sessionId });

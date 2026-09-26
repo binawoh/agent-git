@@ -47,7 +47,7 @@ export function ModePicker(props: { value: string; modes: string[]; onChange: (v
 export function modelOptions(models: ModelChoice[]): MenuOption[] {
   return models.map((choice) => ({
     value: choice.id,
-    label: choice.name ?? choice.id,
+    label: choice.name || choice.id,
     description: choice.description || (choice.name && choice.name !== choice.id ? choice.id : undefined),
   }));
 }

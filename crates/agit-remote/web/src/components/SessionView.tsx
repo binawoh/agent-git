@@ -1,9 +1,10 @@
 import { ArrowDown, Clock, Eye, LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { continueStored, interrupt, loadHistory, loadModels, projectOfLocal, send, sessionModel, setModel, setPermissionMode, useStore } from "../store";
+import { continueStored, interrupt, loadHistory, loadModels, projectOfLocal, runCommand, send, sessionCommands, sessionModel, setModel, setPermissionMode, useStore } from "../store";
 import { emptyTranscript } from "../transcript";
 import type { LocalSession, ModelChoice, ModelState, SessionInfo } from "../types";
-import { Composer, type AttachTarget } from "./Composer";
+import { Composer, type AttachTarget, type SlashCommand } from "./Composer";
+import { ContextRing, contextUse, extensionInfo, slashCommands } from "./SessionInfo";
 import { blocks, EntryView } from "./Entries";
 import { effortName, runtimeName } from "./labels";
 import { EffortPicker, effortOptions, ModelPicker, modelOptions, ModePicker } from "./Pickers";
@@ -176,8 +177,11 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
   const [state, setState] = useState<ModelState>({});
   // The executor refuses model changes during a turn; a change made then waits for its end.
   const [queued, setQueued] = useState<{ model?: string; effort?: string } | null>(null);
+  const [codexCommands, setCodexCommands] = useState<SlashCommand[]>([]);
 
+  // Context use changes with every turn, so the state is read again whenever a turn ends.
   useEffect(() => {
+    if (running) return;
     let cancelled = false;
     void sessionModel(session.session_id).then((result) => {
       if (!cancelled && result) setState(result);
@@ -185,7 +189,28 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
     return () => {
       cancelled = true;
     };
-  }, [session.session_id]);
+  }, [session.session_id, running]);
+
+  useEffect(() => {
+    if (session.runtime !== "codex") return;
+    let cancelled = false;
+    void sessionCommands(session.session_id).then((commands) => {
+      if (!cancelled) setCodexCommands(commands.map((command) => ({ name: command.name, description: command.description })));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [session.session_id, session.runtime]);
+
+  const commands = slashCommands(state, codexCommands);
+  const context = contextUse(state);
+
+  /** Codex runs its commands natively; Claude Code reads a `/name` message itself. */
+  function submit(text: string) {
+    const command = /^\/([\w:.-]+)\s*$/.exec(text.trim())?.[1];
+    if (session.runtime === "codex" && command && codexCommands.some((item) => item.name === command)) return runCommand(session.session_id, command);
+    return send(session.session_id, text);
+  }
 
   const models = state.models ?? [];
   const model = state.selected_model ?? state.model ?? null;
@@ -231,9 +256,11 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
         placeholder={running ? "补充说明，会在合适的时机交给 agent…" : `发消息给 ${runtimeName[session.runtime] ?? session.runtime}…`}
         running={running}
         draftKey={session.session_id}
-        onSubmit={(text) => send(session.session_id, text)}
+        onSubmit={submit}
         onStop={() => void interrupt(session.session_id)}
         attach={attach}
+        commands={commands}
+        extensions={extensionInfo(state)}
         left={<ModePicker value={mode} modes={modes} disabled={modes.length < 2} onChange={(value) => void setPermissionMode(session.session_id, value)} />}
         right={
           <>
@@ -252,6 +279,7 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
               note={note}
               onChange={(value) => void change({ effort: value })}
             />
+            {context && <ContextRing use={context} />}
           </>
         }
       />
