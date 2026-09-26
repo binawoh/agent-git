@@ -22,6 +22,10 @@ use tokio::{
 
 /// Pings must arrive well inside the executor's presence silence limit, or it drops the socket.
 const PRESENCE_PING: Duration = Duration::from_secs(20);
+/// Executors answer every ping. A path that dies without closing keeps the socket open here,
+/// and until it is dropped the device looks online while every offer goes nowhere; missing
+/// several answers in a row marks the device offline instead.
+const PRESENCE_SILENCE: Duration = Duration::from_secs(60);
 /// The ping keeps proxies from timing out idle links and rechecks the grant between the
 /// controller's own health checks.
 const DATA_PING: Duration = Duration::from_secs(25);
@@ -82,16 +86,21 @@ async fn run_presence(app: Arc<App>, device: Device, grant_offers: bool, mut soc
     };
     let mut open = send_json(&mut socket, &ready).await;
     let mut heartbeat = interval_at(Instant::now() + PRESENCE_PING, PRESENCE_PING);
+    let mut heard = Instant::now();
     while open {
         open = tokio::select! {
             _ = stop.notified() => false,
             Some(offer) = queue.recv() => send_json(&mut socket, &offer).await,
             _ = heartbeat.tick() => {
-                app.registry.current(&device)
+                heard.elapsed() < PRESENCE_SILENCE
+                    && app.registry.current(&device)
                     && socket.send(Message::Ping(Bytes::new())).await.is_ok()
             }
             // Executors send nothing on presence except control frames.
-            message = socket.recv() => matches!(message, Some(Ok(Message::Ping(_) | Message::Pong(_)))),
+            message = socket.recv() => {
+                heard = Instant::now();
+                matches!(message, Some(Ok(Message::Ping(_) | Message::Pong(_))))
+            }
         };
     }
     app.relay.detach(&device.id, &epoch);

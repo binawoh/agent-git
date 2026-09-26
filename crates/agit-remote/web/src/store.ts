@@ -298,7 +298,7 @@ async function attachPeer(): Promise<void> {
     await refreshCatalog();
     await reopenView();
   } catch (error) {
-    set({ peerState: "backoff", peerError: message(error) });
+    set({ peerState: unreachable(message(error)) ? "offline" : "backoff", peerError: message(error) });
   }
 }
 
@@ -359,17 +359,27 @@ function scheduleCatalog(delay = 800): void {
   }, delay);
 }
 
+/** The relay answers a dial to a machine without presence with 503, and a dial whose
+ *  machine never joins with a pairing timeout; both mean the machine is unreachable now. */
+function unreachable(error: string | null | undefined): boolean {
+  return Boolean(error && /HTTP 503|temporarily unavailable|offline|pairing timed out/i.test(error));
+}
+
+let lastDevicePoll = 0;
 setInterval(() => {
   if (document.visibilityState !== "visible" || get().connection !== "open") return;
-  if (get().target) void refreshCatalog();
-  // A machine that comes online after the page loaded is attached as soon as it is seen.
+  // An offline machine is looked for often, so it is attached soon after it returns.
+  const offline = get().peerState === "offline";
+  if (!offline && Date.now() - lastDevicePoll < 20_000) return;
+  lastDevicePoll = Date.now();
+  if (get().target && !offline) void refreshCatalog();
   void loadDevices()
     .then(() => {
       const { devices, deviceId, peerState } = get();
       if (peerState === "offline" && devices.some((row) => row.device.id === deviceId && row.online)) void attachPeer();
     })
     .catch(() => {});
-}, 20_000);
+}, 5_000);
 
 export async function bindProject(path: string): Promise<void> {
   const name = path.split(/[\\/]/).filter(Boolean).pop() ?? "project";
@@ -479,8 +489,12 @@ function handleFrame(frame: Frame): void {
     const status = params.status as PeerStatus;
     const target = get().target;
     const moved = status.state === "online" && (!target || target.route_id !== status.route_id || target.generation !== status.generation);
+    // The controller keeps retrying an unreachable machine and reports each miss; that is an
+    // offline machine, not a failure, and the device list shows it as such.
+    const offline = status.state === "backoff" && unreachable(status.error);
+    if (offline && get().peerState !== "offline") void loadDevices().catch(() => {});
     set({
-      peerState: status.state,
+      peerState: offline ? "offline" : status.state,
       peerError: status.error,
       ...(status.description ? { description: status.description } : {}),
       ...(status.state === "online" ? { target: { peer_id: status.peer_id, route_id: status.route_id, generation: status.generation } } : {}),

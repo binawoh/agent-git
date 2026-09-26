@@ -128,10 +128,19 @@ function ConnectionBanner() {
     return null;
   }
   if (devices.length === 0) return null;
-  if (peerState === "offline") return <div className="banner warn">这台电脑现在离线。确认电脑开着，并且 agit daemon 在运行（agit rc start）。</div>;
+  if (peerState === "offline")
+    return (
+      <div className="banner warn" title={peerError ?? undefined}>
+        这台电脑现在连不上：可能关机、休眠、daemon 没在运行（agit rc start），或者网络断了。它一恢复就会自动连上。
+      </div>
+    );
   if (peerState === "connecting") return now - pageLoadedAt > 4000 ? <div className="banner">正在连接电脑…</div> : null;
   if (peerState === "backoff" || peerState === "rejected" || peerState === "stopped")
-    return <div className="banner warn">连接电脑失败{peerError ? `：${peerError}` : ""}，正在重试…</div>;
+    return (
+      <div className="banner warn" title={peerError ?? undefined}>
+        和电脑的连接中断了，正在重新连接…
+      </div>
+    );
   return null;
 }
 
