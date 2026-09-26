@@ -1,5 +1,5 @@
 import { Check, Copy } from "lucide-react";
-import { memo, useRef, useState, type ComponentProps } from "react";
+import { isValidElement, memo, useRef, useState, type ComponentProps } from "react";
 import Markdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
@@ -9,6 +9,8 @@ function CodeBlock(props: ComponentProps<"pre">) {
   const [copied, setCopied] = useState(false);
   const { children, ...rest } = props;
   delete (rest as Record<string, unknown>).node;
+  const className = isValidElement<{ className?: string }>(children) ? (children.props.className ?? "") : "";
+  const language = /language-([\w+#.-]+)/.exec(className)?.[1];
   async function copy() {
     await navigator.clipboard?.writeText(ref.current?.innerText ?? "");
     setCopied(true);
@@ -16,9 +18,13 @@ function CodeBlock(props: ComponentProps<"pre">) {
   }
   return (
     <div className="code-block">
-      <button className="copy" onClick={() => void copy()} title="复制">
-        {copied ? <Check size={14} /> : <Copy size={14} />}
-      </button>
+      <div className="code-header">
+        <span>{language ?? ""}</span>
+        <button type="button" className="copy" onClick={() => void copy()} title="复制">
+          {copied ? <Check size={13} /> : <Copy size={13} />}
+          <span>{copied ? "已复制" : "复制"}</span>
+        </button>
+      </div>
       <pre ref={ref} {...rest}>
         {children}
       </pre>

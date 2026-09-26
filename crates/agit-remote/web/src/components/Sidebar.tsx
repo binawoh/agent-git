@@ -1,8 +1,10 @@
-import { ChevronDown, ChevronRight, FolderPlus, KeyRound, ListFilter, LogOut, Monitor, Plus, Search, X } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsUpDown, FolderPlus, KeyRound, ListFilter, LoaderCircle, LogOut, Monitor, PanelLeftClose, Plus, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import { bindProject, open, projectName, projectOfLocal, selectDevice, signOut, toast, useStore } from "../store";
+import { open, projectName, projectOfLocal, selectDevice, setSidebarCollapsed, signOut, useStore } from "../store";
 import type { LocalSession, Project, SessionInfo } from "../types";
-import { runtimeName, sessionTitle, statusName } from "./labels";
+import { runtimeMark, runtimeName, sessionTitle, statusName } from "./labels";
+import { ActionMenu, MenuPicker } from "./Menu";
+import { ago, useTicking } from "./time";
 
 interface Row {
   key: string;
@@ -31,10 +33,10 @@ export function Sidebar() {
   const me = useStore((state) => state.me);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
-  const [menu, setMenu] = useState(false);
   const [sort, setSortState] = useState<Sort>(() => stored("agit.sort", "recent"));
   const [agent, setAgentState] = useState<AgentFilter>(() => stored("agit.agentFilter", "all"));
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(JSON.parse(localStorage.getItem("agit.collapsed") ?? "[]")));
+  const now = useTicking(true, 60_000);
 
   const setSort = (value: Sort) => {
     localStorage.setItem("agit.sort", value);
@@ -95,36 +97,62 @@ export function Sidebar() {
   }, [projects, sessions, local, sort, agent, needle]);
 
   const selected = view.type === "session" ? view.sessionId : view.type === "local" ? view.nativeId : null;
-
-  async function addFolder() {
-    const path = window.prompt("输入电脑上的项目文件夹路径，例如 D:\\codex\\my-project");
-    if (!path?.trim()) return;
-    try {
-      await bindProject(path.trim());
-      toast("已添加文件夹", "info");
-    } catch (error) {
-      toast(`添加失败：${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
+  const filtered = sort !== "recent" || agent !== "all";
 
   return (
     <aside className="sidebar">
       <div className="sidebar-top">
         <DevicePicker />
-        <button className="nav-item" onClick={() => open({ type: "new", projectId: groups.find((group) => group.project)?.project.project_id ?? projects[0]?.project_id ?? null })}>
-          <Plus size={16} /> 新会话
+        <button type="button" className="sidebar-icon desktop-only" title="收起侧栏" aria-label="收起侧栏" onClick={() => setSidebarCollapsed(true)}>
+          <PanelLeftClose size={17} />
+        </button>
+        <button type="button" className="sidebar-icon mobile-only" title="关闭侧栏" aria-label="关闭侧栏" onClick={() => useStore.setState({ sidebarOpen: false })}>
+          <X size={17} />
+        </button>
+      </div>
+      <div className="sidebar-nav">
+        <button
+          type="button"
+          className="nav-item"
+          onClick={() => open({ type: "new", projectId: groups.find((group) => group.project)?.project.project_id ?? projects[0]?.project_id ?? null })}
+        >
+          <Plus size={16} />
+          <span>新会话</span>
         </button>
       </div>
       <div className="section-header">
         <span>项目</span>
         <div className="section-actions">
-          <button className={`icon-button small ${searching ? "active" : ""}`} title="搜索会话" onClick={() => { setSearching(!searching); setQuery(""); }}>
+          <button
+            type="button"
+            className={`icon-button small ${searching ? "active" : ""}`}
+            title="搜索会话"
+            aria-label="搜索会话"
+            onClick={() => {
+              setSearching(!searching);
+              setQuery("");
+            }}
+          >
             <Search size={14} />
           </button>
-          <button className={`icon-button small ${menu || sort !== "recent" || agent !== "all" ? "active" : ""}`} title="排序和筛选" onClick={() => setMenu(!menu)}>
-            <ListFilter size={14} />
-          </button>
-          <button className="icon-button small" title="添加文件夹" onClick={() => void addFolder()}>
+          <ActionMenu
+            align="right"
+            trigger={(isOpen, toggleMenu) => (
+              <button type="button" className={`icon-button small ${isOpen || filtered ? "active" : ""}`} title="排序和筛选" aria-label="排序和筛选" onClick={toggleMenu}>
+                <ListFilter size={14} />
+              </button>
+            )}
+            items={[
+              { heading: "排序" },
+              { label: "按最近活动", checked: sort === "recent", onSelect: () => setSort("recent") },
+              { label: "按名称", checked: sort === "name", onSelect: () => setSort("name") },
+              { heading: "Agent" },
+              { label: "全部", checked: agent === "all", onSelect: () => setAgent("all") },
+              { label: "Claude Code", checked: agent === "claude-code", onSelect: () => setAgent("claude-code") },
+              { label: "Codex", checked: agent === "codex", onSelect: () => setAgent("codex") },
+            ]}
+          />
+          <button type="button" className="icon-button small" title="添加文件夹" aria-label="添加文件夹" onClick={() => useStore.setState({ folderDialog: true })}>
             <FolderPlus size={14} />
           </button>
         </div>
@@ -134,65 +162,58 @@ export function Sidebar() {
           <Search size={14} />
           <input autoFocus placeholder="搜索会话标题" value={query} onChange={(event) => setQuery(event.target.value)} />
           {query && (
-            <button className="icon-button small" title="清空" onClick={() => setQuery("")}>
+            <button type="button" className="icon-button small" title="清空" aria-label="清空" onClick={() => setQuery("")}>
               <X size={13} />
             </button>
           )}
         </div>
       )}
-      {menu && (
-        <div className="sort-menu">
-          <div className="menu-label">排序</div>
-          <MenuItem active={sort === "recent"} onClick={() => setSort("recent")}>按最近活动</MenuItem>
-          <MenuItem active={sort === "name"} onClick={() => setSort("name")}>按名称</MenuItem>
-          <div className="menu-label">Agent</div>
-          <MenuItem active={agent === "all"} onClick={() => setAgent("all")}>全部</MenuItem>
-          <MenuItem active={agent === "claude-code"} onClick={() => setAgent("claude-code")}>Claude Code</MenuItem>
-          <MenuItem active={agent === "codex"} onClick={() => setAgent("codex")}>Codex</MenuItem>
-        </div>
-      )}
       <nav className="sidebar-scroll">
         {groups.map(({ key, project, rows }) => (
-          <Group key={key || "other"} project={project} rows={rows} selected={selected} collapsed={!needle && collapsed.has(key)} onToggle={() => toggle(key)} />
+          <Group key={key || "other"} project={project} rows={rows} selected={selected} now={now} collapsed={!needle && collapsed.has(key)} onToggle={() => toggle(key)} />
         ))}
         {groups.length === 0 && <div className="group-empty">{needle || agent !== "all" ? "没有匹配的会话" : "还没有项目，点上方的文件夹按钮添加"}</div>}
       </nav>
       <div className="sidebar-footer">
-        <span className="avatar">{me?.username.slice(0, 1).toUpperCase()}</span>
-        <span className="footer-name">{me?.username}</span>
-        <button className="icon-button" title={me?.password_login ? "修改登录密码" : "设置登录密码"} onClick={() => useStore.setState({ passwordDialog: true })}>
-          <KeyRound size={16} />
-        </button>
-        <button className="icon-button" title="退出登录" onClick={() => void signOut()}>
-          <LogOut size={16} />
-        </button>
+        <ActionMenu
+          placement="top"
+          className="account-anchor"
+          trigger={(isOpen, toggleMenu) => (
+            <button type="button" className={`account ${isOpen ? "open" : ""}`} onClick={toggleMenu}>
+              <span className="avatar">{me?.username.slice(0, 1).toUpperCase()}</span>
+              <span className="account-name">{me?.username}</span>
+              <ChevronsUpDown size={14} className="account-chevron" />
+            </button>
+          )}
+          items={[
+            {
+              label: me?.password_login ? "修改登录密码" : "设置登录密码",
+              icon: <KeyRound size={15} />,
+              onSelect: () => useStore.setState({ passwordDialog: true }),
+            },
+            { separator: true },
+            { label: "退出登录", icon: <LogOut size={15} />, danger: true, onSelect: () => void signOut() },
+          ]}
+        />
       </div>
     </aside>
   );
 }
 
-function MenuItem(props: { active: boolean; onClick: () => void; children: string }) {
-  return (
-    <button className={`menu-item ${props.active ? "active" : ""}`} onClick={props.onClick}>
-      {props.children}
-    </button>
-  );
-}
-
-function Group(props: { project: Project | undefined; rows: Row[]; selected: string | null; collapsed: boolean; onToggle: () => void }) {
+function Group(props: { project: Project | undefined; rows: Row[]; selected: string | null; now: number; collapsed: boolean; onToggle: () => void }) {
   const { project, rows, selected, collapsed } = props;
   const [expanded, setExpanded] = useState(false);
   const shown = expanded ? rows : rows.slice(0, PER_GROUP);
   return (
     <section className="group">
       <div className="group-header">
-        <button className="group-toggle" title={project?.local_path} onClick={props.onToggle}>
+        <button type="button" className="group-toggle" title={project?.local_path} aria-expanded={!collapsed} onClick={props.onToggle}>
           {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-          <span>{project ? projectName(project) : "其他"}</span>
+          <span className="group-name">{project ? projectName(project) : "其他"}</span>
           {collapsed && rows.length > 0 && <span className="group-count">{rows.length}</span>}
         </button>
         {project && (
-          <button className="icon-button small" title="在这个项目里新建会话" onClick={() => open({ type: "new", projectId: project.project_id })}>
+          <button type="button" className="group-add" title="在这个项目里新建会话" aria-label="在这个项目里新建会话" onClick={() => open({ type: "new", projectId: project.project_id })}>
             <Plus size={14} />
           </button>
         )}
@@ -201,18 +222,21 @@ function Group(props: { project: Project | undefined; rows: Row[]; selected: str
         <>
           {shown.map((row) => (
             <button
+              type="button"
               key={row.key}
               className={`session-row ${row.key === selected ? "selected" : ""}`}
-              title={`${runtimeName[row.runtime] ?? row.runtime} · ${statusText(row.status)}`}
+              title={`${row.title}\n${runtimeName[row.runtime] ?? row.runtime} · ${statusText(row.status)}`}
               onClick={() => open(row.local ? { type: "local", nativeId: row.key } : { type: "session", sessionId: row.key })}
             >
-              <span className={`dot ${row.status}`} />
               <span className="row-title">{row.title}</span>
-              <span className={`runtime-mark ${row.runtime}`}>{row.runtime === "codex" ? "Cx" : row.runtime === "claude-code" ? "CC" : "OC"}</span>
+              <span className="row-meta">
+                <span className="runtime-mark">{runtimeMark[row.runtime] ?? row.runtime.slice(0, 2)}</span>
+                <RowStatus status={row.status} time={row.time} now={props.now} />
+              </span>
             </button>
           ))}
           {rows.length > PER_GROUP && (
-            <button className="more" onClick={() => setExpanded(!expanded)}>
+            <button type="button" className="more" onClick={() => setExpanded(!expanded)}>
               {expanded ? "收起" : `显示全部 ${rows.length} 个`}
             </button>
           )}
@@ -220,6 +244,17 @@ function Group(props: { project: Project | undefined; rows: Row[]; selected: str
         </>
       )}
     </section>
+  );
+}
+
+function RowStatus({ status, time, now }: { status: string; time: number; now: number }) {
+  if (status === "running") return <LoaderCircle size={13} className="spin row-running" />;
+  if (status === "awaiting_approval") return <span className="row-badge">待审批</span>;
+  return (
+    <>
+      {status === "elsewhere" && <span className="row-dot" />}
+      <span className="row-time">{ago(time, now)}</span>
+    </>
   );
 }
 
@@ -236,22 +271,33 @@ function DevicePicker() {
   const devicesLoaded = useStore((state) => state.devicesLoaded);
   const current = devices.find((row) => row.device.id === deviceId);
   const state = peerState === "online" ? "online" : current?.online ? "connecting" : "offline";
+  const stateText = state === "online" ? "已连接" : state === "connecting" ? "连接中…" : current ? "离线" : "";
   return (
-    <div className="device">
-      <Monitor size={16} />
-      {devices.length > 1 ? (
-        <select value={deviceId ?? ""} onChange={(event) => void selectDevice(event.target.value)}>
-          {devices.map((row) => (
-            <option key={row.device.id} value={row.device.id}>
-              {row.device.display_name}
-              {row.online ? "" : "（离线）"}
-            </option>
-          ))}
-        </select>
-      ) : (
-        <span className="device-name">{current?.device.display_name ?? (devicesLoaded ? "没有电脑" : "连接中…")}</span>
-      )}
-      <span className={`dot ${state}`} title={state === "online" ? "已连接" : state === "connecting" ? "连接中" : "离线"} />
-    </div>
+    <MenuPicker
+      className="device-picker"
+      placement="bottom"
+      title="电脑"
+      icon={
+        <span className="device-icon">
+          <Monitor size={16} />
+          <span className={`status-dot ${state}`} />
+        </span>
+      }
+      value={deviceId ?? ""}
+      display={
+        <span className="device-label">
+          <span className="device-name">{current?.device.display_name ?? (devicesLoaded ? "没有电脑" : "连接中…")}</span>
+          {stateText && <span className="device-state">{stateText}</span>}
+        </span>
+      }
+      disabled={devices.length < 2}
+      options={devices.map((row) => ({
+        value: row.device.id,
+        label: row.device.display_name,
+        description: row.online ? "在线" : "离线",
+        icon: <span className={`status-dot ${row.online ? "online" : "offline"}`} />,
+      }))}
+      onChange={(value) => void selectDevice(value)}
+    />
   );
 }

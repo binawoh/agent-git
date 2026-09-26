@@ -33,7 +33,7 @@ export function FilePicker(props: { start: string; onPick: (paths: string[]) => 
 
   return (
     <div className="dialog-backdrop" onClick={props.onClose}>
-      <div className="dialog picker-dialog" onClick={(event) => event.stopPropagation()}>
+      <div className="dialog picker-dialog" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === "Escape" && props.onClose()}>
         <h3>从电脑选择文件</h3>
         <div className="picker-path">
           <button className="icon-button small" title="上一级" disabled={!parent || parent === here} onClick={() => void go(parent)}>
@@ -47,7 +47,7 @@ export function FilePicker(props: { start: string; onPick: (paths: string[]) => 
               <LoaderCircle size={16} className="spin" />
             </div>
           )}
-          {error && <div className="login-error">{error}</div>}
+          {error && <div className="form-error">{error}</div>}
           {!loading &&
             listing?.entries.map((entry) => {
               const path = join(entry.name);

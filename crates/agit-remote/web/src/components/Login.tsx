@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { options, type Credential } from "../api";
 import { signIn } from "../store";
+import { BrandMark } from "./Brand";
 
 export function Login() {
   const [mode, setMode] = useState<"password" | "token">("token");
@@ -46,7 +47,7 @@ export function Login() {
   return (
     <div className="login">
       <form className="login-card" onSubmit={onSubmit}>
-        <div className="login-mark">A</div>
+        <BrandMark size={44} />
         <h1>AgentGit Remote</h1>
         <p className="muted">{mode === "password" ? "输入你设置的登录密码。" : "用 Hub 的个人访问令牌（PAT）登录。"}</p>
         <input
@@ -58,7 +59,7 @@ export function Login() {
           onChange={(event) => setValue(event.target.value)}
           autoFocus
         />
-        {error && <div className="login-error">{error}</div>}
+        {error && <div className="form-error">{error}</div>}
         <button type="submit" className="primary" disabled={busy || !value}>
           {busy ? "登录中…" : "登录"}
         </button>

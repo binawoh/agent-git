@@ -1,11 +1,13 @@
-import { LoaderCircle } from "lucide-react";
+import { ArrowDown, Clock, Eye, LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { continueStored, interrupt, loadHistory, loadModels, projectOfLocal, send, sessionModel, setModel, setPermissionMode, useStore } from "../store";
 import { emptyTranscript } from "../transcript";
-import type { EffortChoice, LocalSession, ModelChoice, ModelState, SessionInfo } from "../types";
-import { Composer, Picker, type AttachTarget } from "./Composer";
+import type { LocalSession, ModelChoice, ModelState, SessionInfo } from "../types";
+import { Composer, type AttachTarget } from "./Composer";
 import { blocks, EntryView } from "./Entries";
-import { effortName, permissionName, runtimeName } from "./labels";
+import { effortName, runtimeName } from "./labels";
+import { EffortPicker, effortOptions, ModelPicker, modelOptions, ModePicker } from "./Pickers";
+import { elapsed, useTicking } from "./time";
 
 export function SessionView({ sessionKey, local }: { sessionKey: string; local?: boolean }) {
   const transcript = useStore((state) => state.transcripts[sessionKey]) ?? emptyTranscript();
@@ -16,6 +18,7 @@ export function SessionView({ sessionKey, local }: { sessionKey: string; local?:
 
   const scroller = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
   useLayoutEffect(() => {
     const element = scroller.current;
     if (element && pinned.current) element.scrollTop = element.scrollHeight;
@@ -24,6 +27,7 @@ export function SessionView({ sessionKey, local }: { sessionKey: string; local?:
     const element = scroller.current;
     if (!element) return;
     pinned.current = element.scrollHeight - element.scrollTop - element.clientHeight < 120;
+    setAtBottom(pinned.current);
     if (element.scrollTop < 80 && transcript.hasMore && !transcript.loadingEarlier) {
       const before = element.scrollHeight;
       void loadHistory(sessionKey, true).then(() => {
@@ -34,37 +38,62 @@ export function SessionView({ sessionKey, local }: { sessionKey: string; local?:
       });
     }
   }
+  function toBottom() {
+    pinned.current = true;
+    setAtBottom(true);
+    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
+  }
 
   return (
     <div className="session">
-      <div className="conversation" ref={scroller} onScroll={onScroll}>
-        <div className="column">
-          {transcript.loadingEarlier && <div className="loading-more">加载更早的消息…</div>}
-          {transcript.loading && !transcript.loaded && (
-            <div className="loading">
-              <LoaderCircle size={18} className="spin" />
-            </div>
-          )}
-          {transcript.error && <div className="notice error">读取记录失败：{transcript.error}</div>}
-          {entries.map((block) => (
-            <EntryView key={block.id} block={block} sessionId={sessionKey} />
-          ))}
-          {running && (
-            <div className="working">
-              <span className="pulse" /> {session?.status === "awaiting_approval" ? "等待你审批" : "正在工作…"}
-            </div>
-          )}
+      <div className="conversation-area">
+        <div className="conversation" ref={scroller} onScroll={onScroll}>
+          <div className="column">
+            {transcript.loadingEarlier && <div className="loading-more">加载更早的消息…</div>}
+            {transcript.loading && !transcript.loaded && (
+              <div className="loading">
+                <LoaderCircle size={18} className="spin" />
+              </div>
+            )}
+            {transcript.error && <div className="notice error">读取记录失败：{transcript.error}</div>}
+            {entries.map((block, index) => (
+              <EntryView key={block.id} block={block} sessionId={sessionKey} live={running && index === entries.length - 1} />
+            ))}
+            {running && <Working awaiting={session?.status === "awaiting_approval"} since={transcript.turnStartedAt} />}
+          </div>
         </div>
+        {!atBottom && (
+          <button type="button" className="jump-bottom" title="回到底部" aria-label="回到底部" onClick={toBottom}>
+            <ArrowDown size={16} />
+          </button>
+        )}
       </div>
       {local ? localInfo?.likely_active ? (
-        <div className="local-bar">
-          <span>这个会话正在电脑上的其他程序里运行，这里只能查看，每 4 秒自动刷新。关掉那边之后就能在这里接着聊。</span>
+        <div className="composer-wrap">
+          <div className="readonly-bar">
+            <Eye size={16} />
+            <span>这个会话正在电脑上的其他程序里运行，这里只能查看，每 4 秒自动刷新。关掉那边之后就能在这里接着聊。</span>
+          </div>
         </div>
       ) : localInfo ? (
         <LocalComposer session={localInfo} />
       ) : null : session ? (
         <SessionComposer session={session} running={running} />
       ) : null}
+    </div>
+  );
+}
+
+/** The line under a running turn; the clock counts from when this page saw the turn start. */
+function Working({ awaiting, since }: { awaiting: boolean; since: number | null }) {
+  const [mounted] = useState(() => Date.now());
+  const now = useTicking(!awaiting);
+  const start = since ?? mounted;
+  return (
+    <div className={`working ${awaiting ? "awaiting" : ""}`}>
+      {awaiting ? <span className="working-dot" /> : <LoaderCircle size={15} className="spin" />}
+      <span>{awaiting ? "等待你审批" : "正在工作…"}</span>
+      {!awaiting && <span className="working-time">{elapsed(now - start)}</span>}
     </div>
   );
 }
@@ -114,43 +143,30 @@ function LocalComposer({ session }: { session: LocalSession }) {
             permissionMode: mode || undefined,
           })
         }
-      >
-        <span className="picker static" title="Agent（会话创建后不能更换）">
-          {runtimeName[session.runtime] ?? session.runtime}
-        </span>
-        <Picker
-          title="模型"
-          value={model}
-          options={[{ value: "", label: "沿用原模型" }, ...models.map((choice) => ({ value: choice.id, label: choice.name ?? choice.id }))]}
-          onChange={(value) => {
-            setModelChoice(value);
-            setEffort("");
-          }}
-        />
-        <Picker
-          title="思考强度"
-          value={effort}
-          disabled={efforts.length === 0}
-          options={[{ value: "", label: "沿用原强度" }, ...efforts.map((choice) => ({ value: choice.id, label: effortName[choice.id] ?? choice.name ?? choice.id }))]}
-          onChange={setEffort}
-        />
-        <Picker
-          title="权限模式"
-          value={mode}
-          disabled={modes.length === 0}
-          options={[{ value: "", label: "沿用原权限" }, ...modes.map((value) => ({ value, label: permissionName[value] ?? value }))]}
-          onChange={setMode}
-        />
-      </Composer>
+        left={<ModePicker keep value={mode} modes={modes} disabled={modes.length === 0} onChange={setMode} />}
+        right={
+          <>
+            <ModelPicker
+              value={model}
+              display={model ? undefined : "原模型"}
+              options={[{ value: "", label: "沿用原模型", description: "保持这个会话原来的模型" }, ...modelOptions(models)]}
+              onChange={(value) => {
+                setModelChoice(value);
+                setEffort("");
+              }}
+            />
+            <EffortPicker
+              value={effort}
+              display={effort ? undefined : "原强度"}
+              disabled={efforts.length === 0}
+              options={[{ value: "", label: "沿用原强度", description: "保持这个会话原来的思考强度" }, ...effortOptions(efforts)]}
+              onChange={setEffort}
+            />
+          </>
+        }
+      />
     </div>
   );
-}
-
-function effortOptions(efforts: EffortChoice[] | undefined, current: string | null | undefined, defaultLabel: string) {
-  const options = (efforts ?? []).map((choice) => ({ value: choice.id, label: effortName[choice.id] ?? choice.name ?? choice.id }));
-  if (current && !options.some((option) => option.value === current)) options.unshift({ value: current, label: effortName[current] ?? current });
-  if (!current) options.unshift({ value: "", label: defaultLabel });
-  return options;
 }
 
 function SessionComposer({ session, running }: { session: SessionInfo; running: boolean }) {
@@ -172,15 +188,20 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
   }, [session.session_id]);
 
   const models = state.models ?? [];
-  const model = state.model ?? null;
+  const model = state.selected_model ?? state.model ?? null;
   const efforts = state.efforts?.length ? state.efforts : models.find((choice) => choice.id === model)?.efforts;
   const mode = session.permission_mode ?? "default";
   const modes = capability?.permission_modes?.length ? capability.permission_modes : [mode];
   // The lists come from the running agent and can be slow or unavailable; the pickers stay in
   // place and show what is known.
-  const modelOptions = models.map((choice) => ({ value: choice.id, label: choice.name ?? choice.id }));
-  if (model && !modelOptions.some((option) => option.value === model)) modelOptions.unshift({ value: model, label: model });
-  if (modelOptions.length === 0) modelOptions.push({ value: "", label: "默认模型" });
+  const modelChoices = modelOptions(models);
+  if (model && !modelChoices.some((option) => option.value === model)) modelChoices.unshift({ value: model, label: model });
+  if (modelChoices.length === 0) modelChoices.push({ value: "", label: "默认模型" });
+  const effort = state.effort ?? "";
+  const effortChoices = effortOptions(efforts);
+  if (effort && !effortChoices.some((option) => option.value === effort)) effortChoices.unshift({ value: effort, label: effortName[effort] ?? effort });
+  if (!effort) effortChoices.unshift({ value: "", label: "默认强度" });
+  const note = queued ? "这一轮结束后切换" : undefined;
 
   useEffect(() => {
     if (running || !queued) return;
@@ -189,7 +210,7 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
   }, [running, queued]);
 
   async function change(update: { model?: string; effort?: string }) {
-    setState((current) => ({ ...current, ...update }));
+    setState((current) => ({ ...current, ...update, ...(update.model !== undefined ? { selected_model: update.model } : {}) }));
     if (running) {
       setQueued((current) => ({ ...(current ?? {}), ...update, ...(update.model !== undefined && update.effort === undefined ? { effort: undefined } : {}) }));
       return;
@@ -213,27 +234,27 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
         onSubmit={(text) => send(session.session_id, text)}
         onStop={() => void interrupt(session.session_id)}
         attach={attach}
-      >
-        <span className="picker static" title="Agent（会话创建后不能更换）">
-          {runtimeName[session.runtime] ?? session.runtime}
-        </span>
-        {queued && <span className="pending-note">本轮结束后生效</span>}
-        <Picker title="模型" value={model ?? ""} disabled={models.length === 0} options={modelOptions} onChange={(value) => void change({ model: value })} />
-        <Picker
-          title="思考强度"
-          value={state.effort ?? ""}
-          disabled={!efforts?.length}
-          options={effortOptions(efforts, state.effort, "默认强度")}
-          onChange={(value) => void change({ effort: value })}
-        />
-        <Picker
-          title="权限模式"
-          value={mode}
-          disabled={modes.length < 2}
-          options={modes.map((value) => ({ value, label: permissionName[value] ?? value }))}
-          onChange={(value) => void setPermissionMode(session.session_id, value)}
-        />
-      </Composer>
+        left={<ModePicker value={mode} modes={modes} disabled={modes.length < 2} onChange={(value) => void setPermissionMode(session.session_id, value)} />}
+        right={
+          <>
+            {queued && (
+              <span className="pending-note" title="模型或思考强度会在这一轮结束后切换">
+                <Clock size={12} />
+                <span>稍后生效</span>
+              </span>
+            )}
+            <ModelPicker value={model ?? ""} options={modelChoices} disabled={models.length === 0} note={note} onChange={(value) => void change({ model: value })} />
+            <EffortPicker
+              value={effort}
+              display={effort ? undefined : "默认"}
+              options={effortChoices}
+              disabled={!efforts?.length}
+              note={note}
+              onChange={(value) => void change({ effort: value })}
+            />
+          </>
+        }
+      />
     </div>
   );
 }

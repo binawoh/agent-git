@@ -35,7 +35,7 @@ export function PasswordDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="dialog-backdrop" onClick={onClose}>
-      <form className="dialog" onClick={(event) => event.stopPropagation()} onSubmit={submit}>
+      <form className="dialog" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === "Escape" && onClose()} onSubmit={submit}>
         <h3>{me?.password_login ? "修改登录密码" : "设置登录密码"}</h3>
         <p className="muted">以后在网页上用这个密码登录，不需要再输入令牌。至少 {MIN_LENGTH} 个字符。</p>
         {needsCurrent && (
@@ -50,7 +50,7 @@ export function PasswordDialog({ onClose }: { onClose: () => void }) {
           autoFocus={!needsCurrent}
         />
         <input type="password" autoComplete="new-password" placeholder="再输入一次" value={confirm} onChange={(event) => setConfirm(event.target.value)} />
-        {error && <div className="login-error">{error}</div>}
+        {error && <div className="form-error">{error}</div>}
         <div className="dialog-actions">
           <button type="button" onClick={onClose}>
             取消

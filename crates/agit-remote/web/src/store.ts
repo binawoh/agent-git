@@ -53,6 +53,9 @@ interface State {
   toasts: Toast[];
   models: Record<string, ModelChoice[]>;
   passwordDialog: boolean;
+  folderDialog: boolean;
+  /** On wide screens the sidebar can be hidden; phones show it as an overlay instead. */
+  sidebarCollapsed: boolean;
   /** The device list came from the server in this page, not only from the cache. */
   devicesLoaded: boolean;
   connectedOnce: boolean;
@@ -79,6 +82,8 @@ export const useStore = create<State>(() => ({
   toasts: [],
   models: {},
   passwordDialog: false,
+  folderDialog: false,
+  sidebarCollapsed: localStorage.getItem("agit.sidebarCollapsed") === "1",
   devicesLoaded: false,
   connectedOnce: false,
   disconnectedAt: null,
@@ -101,6 +106,11 @@ export function toast(text: string, tone: Toast["tone"] = "error"): void {
 
 export function dismissToast(id: number): void {
   set((state) => ({ toasts: state.toasts.filter((item) => item.id !== id) }));
+}
+
+export function setSidebarCollapsed(collapsed: boolean): void {
+  localStorage.setItem("agit.sidebarCollapsed", collapsed ? "1" : "0");
+  set({ sidebarCollapsed: collapsed });
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));

@@ -147,14 +147,18 @@ export interface EffortChoice {
 export interface ModelChoice {
   id: string;
   name?: string;
+  description?: string | null;
   is_default?: boolean;
   efforts?: EffortChoice[];
   default_effort?: string | null;
 }
 
-/** `session.model`: the running session's model and reasoning effort, and what it offers. */
+/** `session.model`: the running session's model and reasoning effort, and what it offers.
+ *  `selected_model` is the catalog entry chosen for the session when it differs from the
+ *  model the agent reports running. */
 export interface ModelState {
   model?: string | null;
+  selected_model?: string | null;
   effort?: string | null;
   models?: ModelChoice[];
   efforts?: EffortChoice[];
