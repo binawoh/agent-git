@@ -131,8 +131,6 @@ pub struct Redactor {
     persona: Persona,
     username_pattern: Option<Regex>,
     hostname_pattern: Option<Regex>,
-    #[cfg(feature = "secret-vault")]
-    require_repository: bool,
     buffered_stream_bytes: Arc<AtomicUsize>,
     #[cfg(feature = "secret-vault")]
     registered: crate::domain::secret_filter::MatcherHandle,
@@ -251,8 +249,6 @@ impl Redactor {
             username_pattern: token_pattern(persona.username.as_deref()),
             hostname_pattern: token_pattern(persona.hostname.as_deref()),
             persona,
-            #[cfg(feature = "secret-vault")]
-            require_repository: false,
             buffered_stream_bytes: Arc::new(AtomicUsize::new(0)),
             #[cfg(feature = "secret-vault")]
             registered: Default::default(),
@@ -282,13 +278,6 @@ impl Redactor {
             crate::domain::secret_filter::RepositoryDictionary::open(repo_root)?,
         ));
         Ok(self)
-    }
-
-    /// Supervised sessions need a selected Agent repository to publish reversible mappings.
-    #[cfg(feature = "rc")]
-    pub(crate) fn require_repository(mut self) -> Self {
-        self.require_repository = true;
-        self
     }
 
     #[cfg(feature = "rc")]
@@ -553,13 +542,10 @@ impl Redactor {
             );
             (report.text, report.replacements, Vec::new())
         } else {
-            let scrubbed =
-                crate::domain::secrets::scrub_registered(text, &self.registered.snapshot());
-            anyhow::ensure!(
-                !self.require_repository || scrubbed.1 == 0,
-                "content withheld: reversible protection requires the session's Agent repository"
-            );
-            scrubbed
+            // Without an Agent repository a hit cannot be mapped reversibly; it is masked for
+            // good instead. Withholding the whole item hid every command that merely looked
+            // like it held a secret, while the masked text carries none of the secret either.
+            crate::domain::secrets::scrub_registered(text, &self.registered.snapshot())
         };
 
         #[cfg(not(feature = "secret-vault"))]
@@ -1221,6 +1207,22 @@ mod tests {
         let report = redactor.scrub(&format!("{header}\nprivate body material"));
         assert_eq!(report.text, "[redacted:registered-secret]");
         assert_eq!(report.registered_ids, ["sec_header"]);
+    }
+
+    #[cfg(feature = "secret-vault")]
+    #[test]
+    fn a_stream_without_a_repository_masks_a_secret_instead_of_withholding_the_item() {
+        let secret = "sec_value_for_stream_test";
+        let matcher = crate::domain::secret_filter::Matcher::for_test(&[("sec_stream", secret)]);
+        let redactor = Redactor::with_registered(
+            Persona::default(),
+            crate::domain::secret_filter::MatcherHandle::new(matcher),
+        );
+        let mut stream = redactor.stream();
+        stream.push(&format!("echo {secret} && ls")).unwrap();
+        let report = stream.flush().unwrap();
+        assert_eq!(report.text, "echo [redacted:registered-secret] && ls");
+        assert_eq!(report.registered_ids, ["sec_stream"]);
     }
 
     #[test]
