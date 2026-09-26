@@ -93,8 +93,13 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
     };
   }, [session.session_id]);
 
-  const modes = capability?.permission_modes ?? [];
   const mode = session.permission_mode ?? "default";
+  const modes = capability?.permission_modes?.length ? capability.permission_modes : [mode];
+  // The model list comes from the running agent and can be slow or unavailable; the picker
+  // stays in place and shows what is known.
+  const modelOptions = models.map((choice) => ({ value: choice.id, label: choice.name ?? choice.id }));
+  if (model && !modelOptions.some((option) => option.value === model)) modelOptions.unshift({ value: model, label: model });
+  if (modelOptions.length === 0) modelOptions.push({ value: "", label: "默认模型" });
   return (
     <div className="composer-wrap">
       <Composer
@@ -104,25 +109,26 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
         onSubmit={(text) => send(session.session_id, text)}
         onStop={() => void interrupt(session.session_id)}
       >
-        {modes.length > 1 && (
-          <Picker
-            title="权限模式"
-            value={mode}
-            options={modes.map((value) => ({ value, label: permissionName[value] ?? value }))}
-            onChange={(value) => void setPermissionMode(session.session_id, value)}
-          />
-        )}
-        {models.length > 1 && model && (
-          <Picker
-            title="模型"
-            value={model}
-            options={models.map((choice) => ({ value: choice.id, label: choice.name ?? choice.id }))}
-            onChange={(value) => {
-              setCurrentModel(value);
-              void setModel(session.session_id, value);
-            }}
-          />
-        )}
+        <span className="picker static" title="Agent（会话创建后不能更换）">
+          {runtimeName[session.runtime] ?? session.runtime}
+        </span>
+        <Picker
+          title="模型"
+          value={model ?? ""}
+          disabled={models.length === 0}
+          options={modelOptions}
+          onChange={(value) => {
+            setCurrentModel(value);
+            void setModel(session.session_id, value);
+          }}
+        />
+        <Picker
+          title="权限模式"
+          value={mode}
+          disabled={modes.length < 2}
+          options={modes.map((value) => ({ value, label: permissionName[value] ?? value }))}
+          onChange={(value) => void setPermissionMode(session.session_id, value)}
+        />
       </Composer>
     </div>
   );

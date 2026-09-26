@@ -1189,3 +1189,153 @@ button.small {
   gap: 8px;
   margin-top: 6px;
 }
+
+/* ---------------------------------------------------------------- sidebar sections */
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 2px 18px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.section-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.icon-button.active {
+  color: var(--accent-strong);
+  background: var(--hover);
+}
+
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 12px 2px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.sidebar-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+}
+
+.sort-menu {
+  margin: 6px 12px 2px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-label {
+  font-size: 11.5px;
+  color: var(--faint);
+  padding: 4px 8px 2px;
+}
+
+.menu-item {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.menu-item:hover {
+  background: var(--hover);
+}
+
+.menu-item.active {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.group-header {
+  padding-left: 4px;
+}
+
+.group-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  padding: 2px 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.group-toggle span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-toggle:hover {
+  color: var(--text);
+}
+
+.group-count {
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.runtime-mark {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--faint);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 3px;
+}
+
+.session-row:hover .runtime-mark,
+.session-row.selected .runtime-mark {
+  color: var(--muted);
+}
+
+.picker.static {
+  display: inline-flex;
+  align-items: center;
+  cursor: default;
+}
+
+.picker:disabled {
+  opacity: 0.75;
+}
+
+/* The new-session page keeps its composer at the bottom, where a session's composer sits. */
+.new-session {
+  justify-content: space-between;
+}
+
+.new-session .new-hero {
+  margin: auto;
+  padding-bottom: 8vh;
+}
+
+.new-session .composer-wrap {
+  margin-top: 0;
+}

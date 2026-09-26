@@ -272,7 +272,8 @@ export async function refreshCatalog(): Promise<void> {
     set({
       projects: workspaces.workspaces.flatMap((workspace) => workspace.projects),
       sessions: list.sessions,
-      local: (list.local ?? []).filter((session) => !session.adopted),
+      // Listing includes native sessions the daemon already supervises; show each once.
+      local: (list.local ?? []).filter((session) => !list.sessions.some((managed) => managed.runtime_session_id === session.runtime_session_id)),
       catalogLoaded: true,
     });
   } catch (error) {

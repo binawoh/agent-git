@@ -77,9 +77,15 @@ export function Composer(props: {
   );
 }
 
-export function Picker(props: { value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; title?: string }) {
+export function Picker(props: {
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+  title?: string;
+  disabled?: boolean;
+}) {
   return (
-    <select className="picker" title={props.title} value={props.value} onChange={(event) => props.onChange(event.target.value)}>
+    <select className="picker" title={props.title} value={props.value} disabled={props.disabled} onChange={(event) => props.onChange(event.target.value)}>
       {props.options.map((option) => (
         <option key={option.value} value={option.value}>
           {option.label}

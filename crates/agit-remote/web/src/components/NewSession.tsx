@@ -8,14 +8,16 @@ export function NewSession({ projectId }: { projectId: string | null }) {
   const projects = useStore((state) => state.projects);
   const description = useStore((state) => state.description);
   const peerState = useStore((state) => state.peerState);
-  const runtimes = Object.entries(description?.capabilities ?? {})
+  const available = Object.entries(description?.capabilities ?? {})
     .filter(([, capability]) => capability.available)
     .map(([name]) => name);
+  const runtimes = available.length ? available : ["claude-code", "codex"];
 
   const [project, setProject] = useState(projectId ?? projects[0]?.project_id ?? "");
   const [runtime, setRuntime] = useState(() => localStorage.getItem("agit.runtime") ?? "claude-code");
   const [permission, setPermission] = useState(() => localStorage.getItem("agit.permission") ?? "default");
   const [models, setModels] = useState<ModelChoice[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
   const [model, setModel] = useState("");
 
   const activeRuntime = runtimes.includes(runtime) ? runtime : (runtimes[0] ?? runtime);
@@ -32,8 +34,11 @@ export function NewSession({ projectId }: { projectId: string | null }) {
     setModels([]);
     setModel("");
     if (peerState !== "online") return;
+    setLoadingModels(true);
     void loadModels(activeRuntime, cwd).then((choices) => {
-      if (!cancelled) setModels(choices);
+      if (cancelled) return;
+      setModels(choices);
+      setLoadingModels(false);
     });
     return () => {
       cancelled = true;
@@ -58,30 +63,30 @@ export function NewSession({ projectId }: { projectId: string | null }) {
   return (
     <div className="new-session">
       <div className="new-hero">
-        <h2>要在 {selected ? projectName(selected) : "哪个项目"} 里做什么？</h2>
+        <h2>{selected ? `要在 ${projectName(selected)} 里做什么？` : "先在左侧添加一个项目文件夹"}</h2>
         {selected && <p className="muted">{displayPath(selected.local_path)}</p>}
       </div>
       <div className="composer-wrap">
         <Composer placeholder="描述你要做的事…" disabled={peerState !== "online" || !project} onSubmit={submit}>
-          {projects.length > 1 && (
-            <Picker title="项目" value={project} options={projects.map((item) => ({ value: item.project_id, label: projectName(item) }))} onChange={setProject} />
-          )}
-          {runtimes.length > 0 && (
-            <Picker
-              title="Agent"
-              value={activeRuntime}
-              options={runtimes.map((value) => ({ value, label: runtimeName[value] ?? value }))}
-              onChange={setRuntime}
-            />
-          )}
-          {models.length > 0 && (
-            <Picker
-              title="模型"
-              value={model}
-              options={[{ value: "", label: "默认模型" }, ...models.map((choice) => ({ value: choice.id, label: choice.name ?? choice.id }))]}
-              onChange={setModel}
-            />
-          )}
+          <Picker
+            title="项目"
+            value={project}
+            disabled={projects.length < 2}
+            options={projects.length ? projects.map((item) => ({ value: item.project_id, label: projectName(item) })) : [{ value: "", label: "没有项目" }]}
+            onChange={setProject}
+          />
+          <Picker
+            title="Agent"
+            value={activeRuntime}
+            options={runtimes.map((value) => ({ value, label: runtimeName[value] ?? value }))}
+            onChange={setRuntime}
+          />
+          <Picker
+            title={loadingModels ? "正在读取模型列表…" : "模型"}
+            value={model}
+            options={[{ value: "", label: loadingModels ? "默认模型（读取中…）" : "默认模型" }, ...models.map((choice) => ({ value: choice.id, label: choice.name ?? choice.id }))]}
+            onChange={setModel}
+          />
           <Picker
             title="权限模式"
             value={activePermission}
