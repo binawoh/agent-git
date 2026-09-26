@@ -249,6 +249,15 @@ pub fn authorize(
                 (Target::Machine, Need::Admin)
             }
         }
+        // An upload lands in one project, so it takes control of that project, like starting
+        // a session in it.
+        "fs.writeUpload" => {
+            let project = params["project_id"].as_str().ok_or_else(denied)?.to_owned();
+            if !resources.projects.contains_key(&project) {
+                return Err(denied());
+            }
+            (Target::Project(project), Need::Control)
+        }
         "fs.readDirectory" | "fs.readFile" | "project.bind" | "project.unbind"
         | "terminal.open" | "terminal.input" | "terminal.resize" | "terminal.close" => {
             (Target::Machine, Need::Admin)

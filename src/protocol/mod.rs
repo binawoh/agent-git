@@ -542,6 +542,7 @@ pub mod method {
     pub const PROJECT_UNBIND: &str = "project.unbind";
     pub const FS_READ_DIRECTORY: &str = "fs.readDirectory";
     pub const FS_READ_FILE: &str = "fs.readFile";
+    pub const FS_WRITE_UPLOAD: &str = "fs.writeUpload";
 
     // Terminal. The only place that genuinely needs a PTY, for the opposite reason to a
     // session: **a human is on this end**, and what they want is exactly the rendered byte

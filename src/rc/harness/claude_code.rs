@@ -360,6 +360,10 @@ fn argv(spec: &LaunchSpec, session_id: &str) -> Vec<String> {
     } else {
         args.push("--permission-mode".into());
         args.push(native_mode(mode).into());
+        // Claude Code refuses a later `set_permission_mode` to `bypassPermissions` unless the
+        // process was started with this; it only makes the switch possible and enables nothing.
+        // Whether a caller may make that switch stays with the owner check on the RPC.
+        args.push("--allow-dangerously-skip-permissions".into());
     }
     if let Some(m) = &spec.model {
         args.push("--model".into());
@@ -1475,6 +1479,8 @@ mod tests {
         assert!(args.contains(&"--include-partial-messages".to_string()));
         assert!(args.contains(&"--replay-user-messages".to_string()));
         assert!(!args.contains(&"--dangerously-skip-permissions".to_string()));
+        // Without it Claude Code refuses a later switch to bypass in a default-mode session.
+        assert!(args.contains(&"--allow-dangerously-skip-permissions".to_string()));
     }
 
     /// A driver that exists only to feed `classify()`: `cat` stands in for `Proc`, and these

@@ -36,11 +36,22 @@ impl Daemon {
                     PathBuf::from(&p.path)
                 };
                 // Scoped by ownership, not by allowlist: this runs before any
-                // project exists, so it is how the folder picker works at all.
-                let dir = policy::require_dir_under_home(&target).map_err(|e| {
-                    RpcError::new(ErrorCode::PathNotAllowed, e.to_string())
-                        .with_hint("the picker only browses inside your home directory")
-                })?;
+                // project exists, so it is how the folder picker works at all. A bound
+                // project is browsable too, wherever it lives: its files are already readable
+                // through `fs.readFile`, and projects often sit outside the home directory.
+                let roots = self.mirror.roots(&caller.workspace_id);
+                let dir = policy::require_dir_under_home(&target)
+                    .or_else(|home_error| {
+                        policy::require_within(&target, &roots)
+                            .ok()
+                            .filter(|dir| dir.is_dir())
+                            .ok_or(home_error)
+                    })
+                    .map_err(|e| {
+                        RpcError::new(ErrorCode::PathNotAllowed, e.to_string()).with_hint(
+                            "the picker browses your home directory and the bound project folders",
+                        )
+                    })?;
                 let mut entries = vec![];
                 if let Ok(rd) = std::fs::read_dir(&dir) {
                     for e in rd.flatten() {
@@ -117,6 +128,17 @@ impl Daemon {
                         )
                     })?;
                 Ok(serde_json::to_value(read_preview(&path, p.offset)?).unwrap())
+            }
+
+            method::FS_WRITE_UPLOAD => {
+                let p: crate::protocol::FsWriteUpload = f.params_as()?;
+                let root = self
+                    .mirror
+                    .project_path(&p.workspace_id, &p.project_id)
+                    .ok_or_else(|| {
+                        RpcError::new(ErrorCode::WorkspaceNotFound, "no such bound project")
+                    })?;
+                Ok(serde_json::to_value(write_upload(&root, &p.name, &p.base64)?).unwrap())
             }
 
             method::TERMINAL_OPEN => {

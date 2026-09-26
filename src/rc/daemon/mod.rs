@@ -1557,7 +1557,8 @@ fn min_role(method_name: &str) -> Role {
         | method::APPROVAL_DECIDE
         | method::SESSION_SET_MODEL
         | method::SESSION_SET_PERMISSION_MODE
-        | method::FS_READ_FILE => Role::Operator,
+        | method::FS_READ_FILE
+        | method::FS_WRITE_UPLOAD => Role::Operator,
         // Codex's native queue is an independently authorized persisted inbox. It does not
         // acquire the writer lock or start a turn, so an operator may enqueue text while the
         // original process remains the sole transcript writer.
@@ -2188,6 +2189,78 @@ fn utf8_preview_window(bytes: &[u8], nominal_len: usize) -> &[u8] {
     &bytes[start..end]
 }
 
+/// Upper bound on one upload; the frame limit is larger, and base64 grows the bytes by a third.
+const MAX_UPLOAD_BYTES: usize = 5 * 1024 * 1024;
+const UPLOAD_DIR: &str = ".agit-uploads";
+
+/// Save an attached file under `<project>/.agit-uploads/` with a fresh name.
+///
+/// The directory carries its own `.gitignore`, so uploads never show up as changes in the
+/// project's repository. Only the final component of the given name survives, reduced to safe
+/// characters; a name can therefore never climb out of the directory or replace a file.
+fn write_upload(
+    root: &std::path::Path,
+    name: &str,
+    encoded: &str,
+) -> Result<crate::protocol::FsWriteUploadResult, RpcError> {
+    use base64::Engine as _;
+    let io = |error: std::io::Error| RpcError::new(ErrorCode::Internal, error.to_string());
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .map_err(|_| RpcError::new(ErrorCode::MalformedFrame, "the upload is not valid base64"))?;
+    if bytes.is_empty() || bytes.len() > MAX_UPLOAD_BYTES {
+        return Err(RpcError::new(
+            ErrorCode::QuotaExceeded,
+            "uploads must be between 1 byte and 5 MiB",
+        ));
+    }
+    let base = std::path::Path::new(name)
+        .file_name()
+        .map(|file| file.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let safe: String = base
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let safe = safe.trim_start_matches('.');
+    let safe = if safe.is_empty() { "upload" } else { safe };
+    let safe: String = safe
+        .chars()
+        .rev()
+        .take(80)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let dir = root.join(UPLOAD_DIR);
+    std::fs::create_dir_all(&dir).map_err(io)?;
+    let ignore = dir.join(".gitignore");
+    if !ignore.exists() {
+        std::fs::write(&ignore, "*\n").map_err(io)?;
+    }
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    let path = dir.join(format!("{}-{safe}", &id[..8]));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(io)?;
+    std::io::Write::write_all(&mut file, &bytes).map_err(io)?;
+    Ok(crate::protocol::FsWriteUploadResult {
+        path: path
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_string(),
+        size: bytes.len() as u64,
+    })
+}
+
 /// Read one file for the previewer.
 ///
 /// Text comes back as a string, binary as base64 — the previewer wants something it can drop
@@ -2414,3 +2487,30 @@ mod tests;
 
 #[cfg(test)]
 mod preview_tests;
+
+#[cfg(test)]
+mod upload_tests {
+    use base64::Engine as _;
+
+    /// A hostile name must stay inside the upload directory, and a repeated name must not
+    /// replace the earlier file: both would let a remote caller write over project files.
+    #[test]
+    fn uploads_stay_in_their_directory_and_never_overwrite() {
+        let root = tempfile::tempdir().unwrap();
+        let data = base64::engine::general_purpose::STANDARD.encode(b"image bytes");
+        let first = super::write_upload(root.path(), "../../evil.png", &data).unwrap();
+        let second = super::write_upload(root.path(), "../../evil.png", &data).unwrap();
+        let dir = std::fs::canonicalize(root.path().join(super::UPLOAD_DIR)).unwrap();
+        for saved in [&first.path, &second.path] {
+            let saved = std::fs::canonicalize(saved).unwrap();
+            assert_eq!(saved.parent().unwrap(), dir);
+            assert!(saved.to_string_lossy().ends_with("evil.png"));
+        }
+        assert_ne!(first.path, second.path);
+        assert_eq!(
+            std::fs::read_to_string(dir.join(".gitignore")).unwrap(),
+            "*\n"
+        );
+        assert!(super::write_upload(root.path(), "x.png", "not base64!").is_err());
+    }
+}

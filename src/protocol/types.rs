@@ -314,6 +314,24 @@ pub struct DirEntry {
 /// It goes through agitd rather than letting the browser reach the machine
 /// directly: the allowlist lives on the machine, and reading a file passes the
 /// same gate.
+/// Saves a file a remote user attached (an image from a phone, say) into a bound project, so
+/// the agent can read it by path. It never overwrites: every upload gets a fresh name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FsWriteUpload {
+    pub workspace_id: String,
+    pub project_id: String,
+    /// The original file name; only its sanitized final component is kept.
+    pub name: String,
+    pub base64: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FsWriteUploadResult {
+    /// Absolute path of the saved file.
+    pub path: String,
+    pub size: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FsReadFile {
     pub workspace_id: String,
