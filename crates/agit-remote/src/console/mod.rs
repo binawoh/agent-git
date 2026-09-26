@@ -1,9 +1,10 @@
-//! The Web console: PAT sign-in, a session cookie, and one WebSocket per browser tab that
+//! The Web console: password or PAT sign-in, a session cookie, and one WebSocket per browser tab that
 //! speaks the `agitd-controller` JSON-RPC surface. Requests go through
 //! `agit_controller::host::dispatch` to an in-process controller, which reaches executors
 //! through this same relay over loopback.
 
 mod assets;
+mod password;
 mod sessions;
 
 use crate::{
@@ -87,6 +88,7 @@ pub struct Console {
     secure_cookie: bool,
     failures: Mutex<Vec<Instant>>,
     dev_pat: Option<String>,
+    password: password::Password,
 }
 
 impl Console {
@@ -103,6 +105,7 @@ impl Console {
             secure_cookie: issuer.starts_with("https://"),
             failures: Mutex::default(),
             dev_pat,
+            password: password::Password::open(data.join("console-password.json"))?,
         })
     }
 
@@ -196,6 +199,7 @@ pub fn routes() -> Router<Arc<App>> {
         .route("/console/api/logout", post(logout))
         .route("/console/api/me", get(me))
         .route("/console/api/options", get(options))
+        .route("/console/api/password", post(set_password))
         .route("/console/ws", get(socket))
 }
 
@@ -217,7 +221,7 @@ async fn session(app: &App, headers: &HeaderMap) -> ApiResult<sessions::Session>
     let token = session_token(headers).ok_or_else(|| ApiError::unauthorized("sign in first"))?;
     app.console
         .sessions
-        .authenticate(&app.accounts, token)
+        .authenticate(&app.accounts, app.console.password.version(), token)
         .await
         .ok_or_else(|| ApiError::unauthorized("the session has ended; sign in again"))
 }
@@ -237,13 +241,19 @@ fn same_origin(app: &App, headers: &HeaderMap) -> ApiResult<()> {
 struct SignInRequest {
     #[serde(default)]
     token: String,
+    /// The console password, when one is set; otherwise sign-in takes a PAT.
+    #[serde(default)]
+    password: Option<String>,
     /// Sign in with the server's development PAT; only honoured when one was configured.
     #[serde(default)]
     dev: bool,
 }
 
 async fn options(State(app): State<Arc<App>>) -> Json<Value> {
-    Json(json!({"dev_login": app.console.dev_pat.is_some()}))
+    Json(json!({
+        "dev_login": app.console.dev_pat.is_some(),
+        "password_login": app.console.password.is_set(),
+    }))
 }
 
 async fn login(
@@ -253,6 +263,20 @@ async fn login(
 ) -> ApiResult<Response> {
     same_origin(&app, &headers)?;
     app.console.throttle()?;
+    if let Some(candidate) = request.password {
+        let owner = verify_password(&app, candidate).await?;
+        let token = app.console.sessions.create(
+            owner.account_id.clone(),
+            owner.username.clone(),
+            sessions::Credential::Password(owner.version),
+        )?;
+        return Ok(signed_in_response(
+            &app,
+            &token,
+            &owner.account_id,
+            &owner.username,
+        ));
+    }
     let token = match (&app.console.dev_pat, request.dev) {
         (Some(pat), true) => pat.as_str(),
         (None, true) => return Err(ApiError::forbidden("development sign-in is disabled")),
@@ -268,16 +292,89 @@ async fn login(
     let token = app.console.sessions.create(
         signed_in.account_id.clone(),
         signed_in.username.clone(),
-        signed_in.refresh_token,
+        sessions::Credential::Hub(signed_in.refresh_token),
     )?;
-    Ok((
+    Ok(signed_in_response(
+        &app,
+        &token,
+        &signed_in.account_id,
+        &signed_in.username,
+    ))
+}
+
+fn signed_in_response(app: &App, token: &str, account_id: &str, username: &str) -> Response {
+    (
         [(
             header::SET_COOKIE,
-            app.console.cookie(&token, COOKIE_MAX_AGE),
+            app.console.cookie(token, COOKIE_MAX_AGE),
         )],
-        Json(json!({"account_id": signed_in.account_id, "username": signed_in.username})),
+        Json(json!({"account_id": account_id, "username": username})),
     )
-        .into_response())
+        .into_response()
+}
+
+/// Counts a wrong password against the same sign-in budget as a wrong PAT.
+async fn verify_password(app: &Arc<App>, candidate: String) -> ApiResult<password::Owner> {
+    let checker = app.clone();
+    let owner = tokio::task::spawn_blocking(move || checker.console.password.verify(&candidate))
+        .await
+        .map_err(|error| anyhow::anyhow!("password check failed: {error}"))?;
+    owner.ok_or_else(|| {
+        app.console.failures.lock().unwrap().push(Instant::now());
+        ApiError::unauthorized("wrong password")
+    })
+}
+
+#[derive(Deserialize)]
+struct PasswordRequest {
+    #[serde(default)]
+    current: Option<String>,
+    password: String,
+}
+
+/// Sets or changes the console password. A session that signed in with the password must
+/// prove it again; a PAT session may replace a forgotten one, since the PAT is the stronger
+/// credential. Every other password session ends; the caller receives a fresh one.
+async fn set_password(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    Json(request): Json<PasswordRequest>,
+) -> ApiResult<Response> {
+    same_origin(&app, &headers)?;
+    let session = session(&app, &headers).await?;
+    password::Password::validate(&request.password).map_err(ApiError::bad_request)?;
+    if session.by_password() {
+        app.console.throttle()?;
+        let current = request.current.unwrap_or_default();
+        verify_password(&app, current).await?;
+    }
+    let setter = app.clone();
+    let (account_id, username) = (session.account_id.clone(), session.username.clone());
+    let version = tokio::task::spawn_blocking(move || {
+        setter
+            .console
+            .password
+            .set(&account_id, &username, &request.password)
+    })
+    .await
+    .map_err(|error| anyhow::anyhow!("setting the password failed: {error}"))??;
+    if session.by_password() {
+        if let Some(old) = session_token(&headers) {
+            app.console.sessions.remove(old)?;
+        }
+        let token = app.console.sessions.create(
+            session.account_id.clone(),
+            session.username.clone(),
+            sessions::Credential::Password(version),
+        )?;
+        return Ok(signed_in_response(
+            &app,
+            &token,
+            &session.account_id,
+            &session.username,
+        ));
+    }
+    Ok(Json(json!({"ok": true})).into_response())
 }
 
 async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> ApiResult<Response> {
@@ -295,7 +392,9 @@ async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> ApiResult<Re
 async fn me(State(app): State<Arc<App>>, headers: HeaderMap) -> ApiResult<Json<Value>> {
     let session = session(&app, &headers).await?;
     Ok(Json(
-        json!({"account_id": session.account_id, "username": session.username, "issuer": app.issuer}),
+        json!({"account_id": session.account_id, "username": session.username, "issuer": app.issuer,
+            "password_login": app.console.password.is_set(),
+            "signed_in_with": if session.by_password() { "password" } else { "token" }}),
     ))
 }
 

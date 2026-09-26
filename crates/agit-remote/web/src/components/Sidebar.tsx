@@ -1,4 +1,4 @@
-import { FolderPlus, LogOut, Monitor, Plus } from "lucide-react";
+import { FolderPlus, KeyRound, LogOut, Monitor, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { bindProject, open, projectName, projectOfLocal, selectDevice, signOut, toast, useStore } from "../store";
 import type { LocalSession, Project, SessionInfo } from "../types";
@@ -84,6 +84,9 @@ export function Sidebar() {
       <div className="sidebar-footer">
         <span className="avatar">{me?.username.slice(0, 1).toUpperCase()}</span>
         <span className="footer-name">{me?.username}</span>
+        <button className="icon-button" title={me?.password_login ? "修改登录密码" : "设置登录密码"} onClick={() => useStore.setState({ passwordDialog: true })}>
+          <KeyRound size={16} />
+        </button>
         <button className="icon-button" title="退出登录" onClick={() => void signOut()}>
           <LogOut size={16} />
         </button>

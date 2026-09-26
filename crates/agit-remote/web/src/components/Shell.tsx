@@ -1,6 +1,8 @@
-import { Menu } from "lucide-react";
+import { Menu, X } from "lucide-react";
+import { useState } from "react";
 import { displayPath, projectName, projectOfLocal, useStore } from "../store";
 import { NewSession } from "./NewSession";
+import { PasswordDialog } from "./PasswordDialog";
 import { SessionView } from "./SessionView";
 import { Sidebar } from "./Sidebar";
 import { runtimeName, sessionTitle } from "./labels";
@@ -8,6 +10,7 @@ import { runtimeName, sessionTitle } from "./labels";
 export function Shell() {
   const sidebarOpen = useStore((state) => state.sidebarOpen);
   const view = useStore((state) => state.view);
+  const passwordDialog = useStore((state) => state.passwordDialog);
   return (
     <div className={`shell ${sidebarOpen ? "sidebar-open" : ""}`}>
       <Sidebar />
@@ -15,6 +18,7 @@ export function Shell() {
       <main className="main">
         <TopBar />
         <ConnectionBanner />
+        <PasswordHint />
         {view.type === "session" ? (
           <SessionView key={view.sessionId} sessionKey={view.sessionId} />
         ) : view.type === "local" ? (
@@ -25,6 +29,31 @@ export function Shell() {
           <Home />
         )}
       </main>
+      {passwordDialog && <PasswordDialog onClose={() => useStore.setState({ passwordDialog: false })} />}
+    </div>
+  );
+}
+
+function PasswordHint() {
+  const me = useStore((state) => state.me);
+  const [hidden, setHidden] = useState(() => sessionStorage.getItem("agit.passwordHint") === "hidden");
+  if (!me || me.password_login !== false || hidden) return null;
+  return (
+    <div className="banner hint">
+      <span>还没有设置登录密码。设置后，以后登录不用再输令牌。</span>
+      <button className="primary small" onClick={() => useStore.setState({ passwordDialog: true })}>
+        设置密码
+      </button>
+      <button
+        className="icon-button small"
+        title="暂时不设置"
+        onClick={() => {
+          sessionStorage.setItem("agit.passwordHint", "hidden");
+          setHidden(true);
+        }}
+      >
+        <X size={14} />
+      </button>
     </div>
   );
 }

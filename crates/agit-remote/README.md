@@ -49,6 +49,21 @@ cargo build --release --locked -p agit-remote --target x86_64-unknown-linux-musl
 The service keeps the device registry and console sessions in its data directory. Presence,
 grants and links live in memory: a restart drops open links and endpoints reconnect.
 
+## Sign in to the console
+
+The first sign-in uses a Hub PAT. Issue one for the console without reusing another client's:
+
+```sh
+sudo -u agit-hub agit-selfhost --data /var/lib/agit-selfhost issue-token --label web-console
+```
+
+After signing in, the key button in the sidebar sets a console password; from then on the
+sign-in page asks for the password. It is stored as an Argon2id hash in the service's data
+directory (`console-password.json`). Changing it ends every session that signed in with the
+old password. A session signed in with a PAT may replace a forgotten password without the old
+one, so a new PAT is the recovery path. The command line keeps using PATs: `agit login` has no
+password flow.
+
 ## Connect a machine
 
 On the machine to control, with `AGIT_HUB_URL` pointing at the Hub and a signed-in account:

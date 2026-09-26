@@ -51,6 +51,7 @@ interface State {
   sidebarOpen: boolean;
   toasts: Toast[];
   models: Record<string, ModelChoice[]>;
+  passwordDialog: boolean;
 }
 
 export const useStore = create<State>(() => ({
@@ -72,6 +73,7 @@ export const useStore = create<State>(() => ({
   sidebarOpen: false,
   toasts: [],
   models: {},
+  passwordDialog: false,
 }));
 
 const get = useStore.getState;
@@ -133,9 +135,14 @@ export async function boot(): Promise<void> {
   }
 }
 
-export async function signIn(token: string | null): Promise<void> {
-  await api.login(token);
+export async function signIn(credential: api.Credential): Promise<void> {
+  await api.login(credential);
   await boot();
+}
+
+export async function refreshMe(): Promise<void> {
+  const me = await api.me();
+  if (me) set({ me });
 }
 
 export async function signOut(): Promise<void> {

@@ -4,7 +4,16 @@ export interface Me {
   account_id: string;
   username: string;
   issuer: string;
+  password_login?: boolean;
+  signed_in_with?: "password" | "token";
 }
+
+export interface Options {
+  dev_login: boolean;
+  password_login: boolean;
+}
+
+export type Credential = { password: string } | { token: string } | { dev: true };
 
 async function json<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({}));
@@ -18,21 +27,33 @@ export async function me(): Promise<Me | null> {
   return json<Me>(response);
 }
 
-export async function login(token: string | null): Promise<void> {
+export async function options(): Promise<Options> {
+  const response = await fetch("/console/api/options", { credentials: "same-origin" });
+  if (!response.ok) return { dev_login: false, password_login: false };
+  return json<Options>(response);
+}
+
+export async function login(credential: Credential): Promise<void> {
   await json(
     await fetch("/console/api/login", {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(token === null ? { dev: true } : { token }),
+      body: JSON.stringify(credential),
     }),
   );
 }
 
-/** Whether this server is a local test instance offering development sign-in. */
-export async function devLogin(): Promise<boolean> {
-  const response = await fetch("/console/api/options", { credentials: "same-origin" });
-  return response.ok && Boolean((await response.json()).dev_login);
+/** `current` is required when the session signed in with the password it replaces. */
+export async function setPassword(current: string | null, password: string): Promise<void> {
+  await json(
+    await fetch("/console/api/password", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(current === null ? { password } : { current, password }),
+    }),
+  );
 }
 
 export async function logout(): Promise<void> {

@@ -1107,3 +1107,85 @@ button.danger {
     opacity: 1;
   }
 }
+
+/* ---------------------------------------------------------------- dialogs and small controls */
+
+button.link {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+button.small {
+  padding: 3px 10px;
+  font-size: 13px;
+}
+
+.banner.hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.banner.hint span {
+  flex: 1;
+  min-width: 180px;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.35);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.dialog {
+  width: min(400px, 100%);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dialog h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.dialog p {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.dialog input {
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--panel);
+  outline: none;
+  font-size: 16px;
+}
+
+.dialog input:focus {
+  border-color: var(--accent);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}

@@ -12,6 +12,7 @@ agit-controller = { path = "../agit-controller", features = ["host"] }
 agit-peer = { path = "../agit-peer", features = ["cloud-client"] }
 agit-tunnel = { path = "../agit-tunnel", features = ["worker"] }
 anyhow = "1"
+argon2 = "0.5"
 axum = { version = "0.8", features = ["ws"] }
 clap = { version = "4", features = ["derive"] }
 futures-util = { version = "0.3", features = ["sink"] }
