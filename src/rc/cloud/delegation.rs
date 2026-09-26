@@ -316,6 +316,7 @@ impl Controller {
                         | "workspace.list"
                         | "session.list"
                         | "runtime.models"
+                        | "runtime.usage"
                         | "session.start"
                 ),
             "project controller cannot issue session or machine commands"
@@ -331,6 +332,7 @@ impl Controller {
                     frame.method(),
                     "machine.describe"
                         | "runtime.models"
+                        | "runtime.usage"
                         | "workspace.list"
                         | "session.list"
                         | "session.history"

@@ -358,7 +358,7 @@ async fn serve_described(
                             if let Some(log) = &diagnostics { log.response(client, &response); }
                             if peer.output.send_work(response.to_json(), std::time::Duration::from_secs(2), work).await.is_err() { clients.remove(&client); }
                         }
-                        Ok(frame) if matches!(frame.method(), "runtime.models" | "session.goal.read") => {
+                        Ok(frame) if matches!(frame.method(), "runtime.models" | "runtime.usage" | "session.goal.read") => {
                             let output = peer.output.clone();
                             let slots = discovery_slots.clone();
                             tokio::spawn(async move {
@@ -369,11 +369,18 @@ async fn serve_described(
                                         return;
                                     }
                                     let is_goal = frame.method() == "session.goal.read";
+                                    let is_usage = frame.method() == "runtime.usage";
                                     let params = frame.params.unwrap_or_default();
                                     let runtime = params.get("runtime").and_then(serde_json::Value::as_str).unwrap_or("");
                                     let cwd = params.get("cwd").and_then(serde_json::Value::as_str).filter(|s| !s.is_empty()).map(PathBuf::from)
                                         .unwrap_or_else(|| crate::infra::config::user_home().unwrap_or_default());
-                                    let result = if is_goal { super::local_goal::read(params).await } else { super::harness::models::discover(runtime, cwd).await };
+                                    let result = if is_goal {
+                                        super::local_goal::read(params).await
+                                    } else if is_usage {
+                                        super::harness::models::usage(runtime, params.get("model").and_then(serde_json::Value::as_str)).await
+                                    } else {
+                                        super::harness::models::discover(runtime, cwd).await
+                                    };
                                     match result {
                                         Ok(models) => Frame::response(original_id, models),
                                         Err(error) => Frame::error_response(original_id, RpcError::new(ErrorCode::RuntimeUnavailable, error.to_string())),

@@ -70,7 +70,7 @@ async fn response(proc: &mut Proc, id: Value, claude: bool) -> crate::Result<Val
             if claude && value.pointer("/response/request_id") == Some(&id) {
                 ensure!(
                     value.pointer("/response/subtype").and_then(Value::as_str) == Some("success"),
-                    "Claude model discovery failed: {}",
+                    "Claude refused the request: {}",
                     value["response"]
                 );
                 return Ok(value["response"]["response"].clone());
@@ -78,7 +78,7 @@ async fn response(proc: &mut Proc, id: Value, claude: bool) -> crate::Result<Val
             if !claude && value.get("id") == Some(&id) {
                 ensure!(
                     value.get("error").is_none(),
-                    "Codex model discovery failed: {}",
+                    "Codex refused the request: {}",
                     value["error"]
                 );
                 return value
@@ -88,7 +88,7 @@ async fn response(proc: &mut Proc, id: Value, claude: bool) -> crate::Result<Val
             }
         }
     }
-    anyhow::bail!("Runtime exited during model discovery")
+    anyhow::bail!("Runtime exited before answering")
 }
 
 pub(crate) async fn codex_goal(cwd: PathBuf, thread: &str) -> crate::Result<Value> {
@@ -162,6 +162,83 @@ pub async fn discover(runtime: &str, cwd: PathBuf) -> crate::Result<Value> {
     value
 }
 
+/// The account's plan usage, and for Claude Code the context window of `model`, asked of a
+/// short-lived runtime so viewers can show both while no session of the runtime is running.
+/// Neither answer involves a model call. The runtime starts in the temporary directory, and
+/// Claude Code with project settings only and no MCP configuration: hooks, plugins and servers
+/// bear on neither answer, and starting them would run their side effects for a read.
+pub async fn usage(runtime: &str, model: Option<&str>) -> crate::Result<Value> {
+    let model = usage_model(model)?;
+    let cwd = std::env::temp_dir();
+    let observed_at = chrono::Utc::now().timestamp();
+    let (program, mut args) = match runtime {
+        "codex" => ("codex", vec!["app-server".to_string()]),
+        "claude-code" => (
+            "claude",
+            [
+                "-p",
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--setting-sources",
+                "project",
+                "--strict-mcp-config",
+                "--no-session-persistence",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        ),
+        _ => anyhow::bail!("This runtime does not report plan usage"),
+    };
+    if let (Some(model), "claude-code") = (model, runtime) {
+        args.extend(["--model".to_string(), model.to_string()]);
+    }
+    let mut proc = Proc::spawn(program, &args, &cwd, &[])?;
+    let result = tokio::time::timeout(std::time::Duration::from_secs(25), async {
+        if runtime == "claude-code" {
+            proc.write_line(&json!({"type":"control_request", "request_id":"init", "request":{"subtype":"initialize", "hooks":{}}})).await?;
+            response(&mut proc, json!("init"), true).await?;
+            proc.write_line(&json!({"type":"control_request", "request_id":"usage", "request":{"subtype":"get_usage"}})).await?;
+            let usage = response(&mut proc, json!("usage"), true).await?;
+            proc.write_line(&json!({"type":"control_request", "request_id":"context", "request":{"subtype":"get_context_usage", "detail":"summary"}})).await?;
+            let context = response(&mut proc, json!("context"), true).await?;
+            Ok(json!({"runtime":runtime, "observed_at":observed_at, "usage":usage, "model":model, "context_window":context["maxTokens"]}))
+        } else {
+            proc.write_line(&json!({"id":1, "method":"initialize", "params":{"clientInfo":{"name":"agentgit_usage", "version":"0.1.0"}, "capabilities":{}}})).await?;
+            response(&mut proc, json!(1), false).await?;
+            proc.write_line(&json!({"method":"initialized"})).await?;
+            proc.write_line(&json!({"id":2, "method":"account/rateLimits/read", "params":{}})).await?;
+            let usage = response(&mut proc, json!(2), false).await?;
+            Ok(json!({"runtime":runtime, "observed_at":observed_at, "usage":usage}))
+        }
+    })
+    .await;
+    let shutdown = proc.shutdown().await;
+    let value: crate::Result<Value> = result.context("Runtime usage inspection timed out")?;
+    shutdown?;
+    value
+}
+
+/// The model a usage inspection starts the runtime with. It becomes a command-line argument,
+/// so a value that reads as an option would change how the runtime starts.
+fn usage_model(model: Option<&str>) -> crate::Result<Option<&str>> {
+    let Some(model) = model.filter(|model| !model.is_empty()) else {
+        return Ok(None);
+    };
+    ensure!(
+        model.len() <= 128
+            && !model.starts_with('-')
+            && model
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "._:-[]".contains(c)),
+        "model must be a model identifier"
+    );
+    Ok(Some(model))
+}
+
 pub(super) fn normalize(runtime: &str, native: &Value) -> crate::Result<Vec<Value>> {
     let list = native
         .get(if runtime == "codex" { "data" } else { "models" })
@@ -187,6 +264,22 @@ pub(super) fn normalize(runtime: &str, native: &Value) -> crate::Result<Vec<Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A usage inspection passes the model to the runtime's command line; a value that reads as
+    /// an option must be refused rather than start the runtime differently.
+    #[test]
+    fn usage_models_are_identifiers_and_never_options() {
+        assert_eq!(usage_model(None).unwrap(), None);
+        assert_eq!(usage_model(Some("")).unwrap(), None);
+        assert_eq!(
+            usage_model(Some("claude-opus-5-5[1m]")).unwrap(),
+            Some("claude-opus-5-5[1m]")
+        );
+        for refused in ["--settings", "-p", "model name", "<synthetic>"] {
+            assert!(usage_model(Some(refused)).is_err(), "{refused}");
+        }
+    }
+
     #[test]
     fn settings_patches_distinguish_omission_reset_and_native_identifiers() {
         let patch = ModelPatch::parse(&json!({"model":"provider/model", "effort":null})).unwrap();

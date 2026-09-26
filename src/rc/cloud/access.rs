@@ -240,7 +240,7 @@ pub fn authorize(
             }
             (Target::Project(project), Need::Control)
         }
-        "runtime.models" => {
+        "runtime.models" | "runtime.usage" => {
             if let Some(project) = params["project_id"].as_str().map(str::to_owned) {
                 let path = resources.projects.get(&project).ok_or_else(denied)?;
                 params["cwd"] = serde_json::json!(path);

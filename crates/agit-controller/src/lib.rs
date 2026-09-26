@@ -491,6 +491,7 @@ fn is_read(method: &str) -> bool {
             | "session.goal.read"
             | "session.commands"
             | "runtime.models"
+            | "runtime.usage"
             | "fs.readDirectory"
             | "fs.readFile"
     )
