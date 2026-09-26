@@ -374,6 +374,42 @@ mod tests {
         assert!(revoked.result.unwrap()["resolved_session"].is_null());
     }
 
+    /// An upload writes into a project, so reading it is not enough; and a project the
+    /// executor has not reported cannot be named to reach some other path.
+    #[test]
+    fn uploads_require_control_of_a_known_project() {
+        let principal = Principal {
+            issuer: "https://cloud.example".into(),
+            account_id: "operator".into(),
+        };
+        let mut resources = Resources::default();
+        resources
+            .projects
+            .insert("project".into(), std::path::PathBuf::from("/trusted"));
+        for (access, allowed) in [(Access::Read, false), (Access::Control, true)] {
+            let policy = Policy::new(
+                1,
+                vec![Rule {
+                    principal: principal.clone(),
+                    resource: Resource::Project("project".into()),
+                    access,
+                }],
+            )
+            .unwrap();
+            let upload = |project: &str| {
+                Frame::request(
+                    "fs.writeUpload",
+                    json!({"project_id":project,"name":"a.png","base64":"AA=="}),
+                )
+            };
+            assert_eq!(
+                authorize(upload("project"), &principal, &policy, &mut resources).is_ok(),
+                allowed
+            );
+            assert!(authorize(upload("unknown"), &principal, &policy, &mut resources).is_err());
+        }
+    }
+
     #[test]
     fn native_inbox_requires_control_of_the_exact_session() {
         let principal = Principal {

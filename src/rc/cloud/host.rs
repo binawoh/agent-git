@@ -251,9 +251,14 @@ async fn run_executor(
                 continue;
             }
         }
-        backoff = (backoff * 2).min(Duration::from_secs(30));
+        backoff = (backoff * 2).min(PRESENCE_BACKOFF_CAP);
     }
 }
+
+/// While presence is down the machine is unreachable from the cloud, and the network outage
+/// that usually caused it ends without notice; the cap bounds how long the machine stays
+/// unreachable after that. Each attempt is one outbound socket, so a short cap stays cheap.
+const PRESENCE_BACKOFF_CAP: Duration = Duration::from_secs(10);
 
 pub struct Route {
     key: String,
