@@ -11,6 +11,7 @@ import type {
   LocalSession,
   MachineDescription,
   ModelChoice,
+  ModelState,
   PeerState,
   PeerStatus,
   Project,
@@ -500,35 +501,60 @@ export async function decide(sessionId: string, approvalId: string, decision: "a
   }
 }
 
-export async function startSession(options: { projectId: string; runtime: string; model: string | null; permissionMode: string; prompt: string }): Promise<void> {
+export async function startSession(options: {
+  projectId: string;
+  runtime: string;
+  model: string | null;
+  effort: string | null;
+  permissionMode: string;
+  prompt: string;
+}): Promise<void> {
   const params: Record<string, unknown> = {
     workspace_id: WORKSPACE,
     project_id: options.projectId,
     runtime: options.runtime,
     start_id: crypto.randomUUID(),
     permission_mode: options.permissionMode,
-    prompt: options.prompt,
   };
   if (options.model) params.model = options.model;
+  // The launch takes no effort, so a chosen one is applied before the first prompt is sent.
+  if (!options.effort) params.prompt = options.prompt;
   const { session } = await request<{ session: SessionInfo }>("session.start", params, 120_000);
   set((state) => ({ sessions: [session, ...state.sessions.filter((item) => item.session_id !== session.session_id)] }));
-  updateTranscript(session.session_id, (transcript) => {
-    if (!transcript.live.some((entry) => entry.type === "user")) {
-      transcript.live.unshift({ type: "user", id: `pending:start`, text: options.prompt, pending: true });
-    }
-    return { loaded: true, turnStartedAt: Date.now() };
-  });
+  if (options.effort) {
+    updateTranscript(session.session_id, () => ({ loaded: true }));
+    open({ type: "session", sessionId: session.session_id });
+    await setModel(session.session_id, { effort: options.effort });
+    await send(session.session_id, options.prompt);
+    return;
+  }
+  showPendingPrompt(session.session_id, options.prompt);
   open({ type: "session", sessionId: session.session_id });
 }
 
-export async function resume(nativeId: string): Promise<void> {
+function showPendingPrompt(sessionId: string, prompt: string): void {
+  updateTranscript(sessionId, (transcript) => {
+    if (!transcript.live.some((entry) => entry.type === "user" && entry.pending && entry.text === prompt)) {
+      transcript.live.push({ type: "user", id: `pending:${crypto.randomUUID()}`, text: prompt, pending: true });
+    }
+    return { turnStartedAt: Date.now() };
+  });
+}
+
+/** Takes over a native session; with a prompt, the takeover also sends it as the next turn. */
+export async function resume(nativeId: string, prompt?: string): Promise<boolean> {
   try {
-    const { session } = await request<{ session: SessionInfo }>("session.resume", { workspace_id: WORKSPACE, session_id: nativeId }, 120_000);
+    const params: Record<string, unknown> = { workspace_id: WORKSPACE, session_id: nativeId };
+    if (prompt) params.prompt = prompt;
+    const { session } = await request<{ session: SessionInfo }>("session.resume", params, 120_000);
     set((state) => ({ sessions: [session, ...state.sessions.filter((item) => item.session_id !== session.session_id)] }));
+    if (prompt) showPendingPrompt(session.session_id, prompt);
     open({ type: "session", sessionId: session.session_id });
     scheduleCatalog();
+    return true;
   } catch (error) {
-    toast(error instanceof RpcError && error.code === 303 ? "这个会话正在另一个程序里运行，先在那边关掉它再接管" : `接管失败：${message(error)}`);
+    toast(error instanceof RpcError && error.code === 303 ? "这个会话正在另一个程序里运行，先在那边关掉它再接着聊" : `接管失败：${message(error)}`);
+    return false;
   }
 }
 
@@ -553,18 +579,28 @@ export async function loadModels(runtime: string, cwd?: string): Promise<ModelCh
   }
 }
 
-export async function sessionModel(sessionId: string): Promise<{ model?: string | null; models?: ModelChoice[] } | null> {
+export async function sessionModel(sessionId: string): Promise<ModelState | null> {
   try {
-    return await request("session.model", { session_id: sessionId });
+    return await request<ModelState>("session.model", { session_id: sessionId });
   } catch {
     return null;
   }
 }
 
-export async function setModel(sessionId: string, model: string): Promise<void> {
-  try {
-    await request("session.setModel", { session_id: sessionId, model });
-  } catch (error) {
-    toast(`切换模型失败：${message(error)}`);
+/** Changes the model, the reasoning effort, or both; an empty value restores the default.
+ *  A session that is still opening refuses without accepting anything, so it is retried. */
+export async function setModel(sessionId: string, change: { model?: string; effort?: string }): Promise<ModelState | null> {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      return await request<ModelState>("session.setModel", { session_id: sessionId, ...change });
+    } catch (error) {
+      if (error instanceof RpcError && error.code === 303 && error.data?.outcome !== "unknown" && /opening|restarting|proving/i.test(error.message)) {
+        await sleep(1000);
+        continue;
+      }
+      toast(`切换${change.effort !== undefined ? "思考强度" : "模型"}失败：${message(error)}`);
+      return null;
+    }
   }
+  return null;
 }

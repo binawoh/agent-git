@@ -138,8 +138,24 @@ export interface Frame {
   stream?: string;
 }
 
+export interface EffortChoice {
+  id: string;
+  name?: string;
+  description?: string | null;
+}
+
 export interface ModelChoice {
   id: string;
   name?: string;
   is_default?: boolean;
+  efforts?: EffortChoice[];
+  default_effort?: string | null;
+}
+
+/** `session.model`: the running session's model and reasoning effort, and what it offers. */
+export interface ModelState {
+  model?: string | null;
+  effort?: string | null;
+  models?: ModelChoice[];
+  efforts?: EffortChoice[];
 }

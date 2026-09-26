@@ -14,6 +14,17 @@ export const permissionName: Record<string, string> = {
   bypass: "跳过所有审批",
 };
 
+export const effortName: Record<string, string> = {
+  none: "不思考",
+  minimal: "最低",
+  low: "低",
+  medium: "中",
+  high: "高",
+  xhigh: "超高",
+  max: "最高",
+  ultra: "极限",
+};
+
 export const statusName: Record<string, string> = {
   idle: "空闲",
   running: "运行中",

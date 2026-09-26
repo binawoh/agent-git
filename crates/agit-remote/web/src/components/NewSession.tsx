@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { displayPath, loadModels, projectName, startSession, toast, useStore } from "../store";
 import type { ModelChoice } from "../types";
 import { Composer, Picker } from "./Composer";
-import { permissionName, runtimeName } from "./labels";
+import { effortName, permissionName, runtimeName } from "./labels";
 
 export function NewSession({ projectId }: { projectId: string | null }) {
   const projects = useStore((state) => state.projects);
@@ -19,6 +19,7 @@ export function NewSession({ projectId }: { projectId: string | null }) {
   const [models, setModels] = useState<ModelChoice[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [model, setModel] = useState("");
+  const [effort, setEffort] = useState("");
 
   const activeRuntime = runtimes.includes(runtime) ? runtime : (runtimes[0] ?? runtime);
   const modes = description?.capabilities?.[activeRuntime]?.permission_modes ?? ["default"];
@@ -33,6 +34,7 @@ export function NewSession({ projectId }: { projectId: string | null }) {
     let cancelled = false;
     setModels([]);
     setModel("");
+    setEffort("");
     if (peerState !== "online") return;
     setLoadingModels(true);
     void loadModels(activeRuntime, cwd).then((choices) => {
@@ -53,13 +55,28 @@ export function NewSession({ projectId }: { projectId: string | null }) {
     localStorage.setItem("agit.runtime", activeRuntime);
     localStorage.setItem("agit.permission", activePermission);
     try {
-      await startSession({ projectId: project, runtime: activeRuntime, model: model || null, permissionMode: activePermission, prompt });
+      await startSession({
+        projectId: project,
+        runtime: activeRuntime,
+        model: model || null,
+        effort: effort || null,
+        permissionMode: activePermission,
+        prompt,
+      });
     } catch (error) {
       toast(`新建会话失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   const selected = projects.find((item) => item.project_id === project);
+  // Efforts belong to a model; with no explicit choice, the default model's list applies.
+  const chosen =
+    models.find((choice) => choice.id === model) ??
+    models.find((choice) => choice.is_default) ??
+    models.find((choice) => choice.id === "default") ??
+    models[0];
+  const efforts = chosen?.efforts ?? [];
+  const defaultEffort = chosen?.default_effort ? `默认强度（${effortName[chosen.default_effort] ?? chosen.default_effort}）` : "默认强度";
   return (
     <div className="new-session">
       <div className="new-hero">
@@ -85,7 +102,17 @@ export function NewSession({ projectId }: { projectId: string | null }) {
             title={loadingModels ? "正在读取模型列表…" : "模型"}
             value={model}
             options={[{ value: "", label: loadingModels ? "默认模型（读取中…）" : "默认模型" }, ...models.map((choice) => ({ value: choice.id, label: choice.name ?? choice.id }))]}
-            onChange={setModel}
+            onChange={(value) => {
+              setModel(value);
+              setEffort("");
+            }}
+          />
+          <Picker
+            title="思考强度"
+            value={effort}
+            disabled={efforts.length === 0}
+            options={[{ value: "", label: defaultEffort }, ...efforts.map((choice) => ({ value: choice.id, label: effortName[choice.id] ?? choice.name ?? choice.id }))]}
+            onChange={setEffort}
           />
           <Picker
             title="权限模式"

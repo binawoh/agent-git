@@ -2,10 +2,10 @@ import { LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { interrupt, loadHistory, resume, send, sessionModel, setModel, setPermissionMode, useStore } from "../store";
 import { emptyTranscript } from "../transcript";
-import type { ModelChoice, SessionInfo } from "../types";
+import type { EffortChoice, LocalSession, ModelState, SessionInfo } from "../types";
 import { Composer, Picker } from "./Composer";
 import { blocks, EntryView } from "./Entries";
-import { permissionName, runtimeName } from "./labels";
+import { effortName, permissionName, runtimeName } from "./labels";
 
 export function SessionView({ sessionKey, local }: { sessionKey: string; local?: boolean }) {
   const transcript = useStore((state) => state.transcripts[sessionKey]) ?? emptyTranscript();
@@ -56,50 +56,75 @@ export function SessionView({ sessionKey, local }: { sessionKey: string; local?:
           )}
         </div>
       </div>
-      {local ? (
+      {local ? localInfo?.likely_active ? (
         <div className="local-bar">
-          {localInfo?.likely_active ? (
-            <span>这个会话正在电脑上的其他程序里运行，这里只能查看，每 4 秒自动刷新。</span>
-          ) : (
-            <>
-              <span>这是电脑上的历史会话。</span>
-              <button className="primary" onClick={() => void resume(sessionKey)}>
-                在这里继续
-              </button>
-            </>
-          )}
+          <span>这个会话正在电脑上的其他程序里运行，这里只能查看，每 4 秒自动刷新。关掉那边之后就能在这里接着聊。</span>
         </div>
-      ) : session ? (
+      ) : localInfo ? (
+        <LocalComposer session={localInfo} />
+      ) : null : session ? (
         <SessionComposer session={session} running={running} />
       ) : null}
     </div>
   );
 }
 
+/** A stored native session continues on its first message: the takeover sends it. */
+function LocalComposer({ session }: { session: LocalSession }) {
+  return (
+    <div className="composer-wrap">
+      <Composer placeholder={`接着这个会话发消息给 ${runtimeName[session.runtime] ?? session.runtime}…`} draftKey={session.runtime_session_id} onSubmit={(text) => void resume(session.runtime_session_id, text)}>
+        <span className="picker static" title="Agent（会话创建后不能更换）">
+          {runtimeName[session.runtime] ?? session.runtime}
+        </span>
+        <span className="picker static muted" title="接管后可以切换">
+          沿用原来的模型和权限
+        </span>
+      </Composer>
+    </div>
+  );
+}
+
+function effortOptions(efforts: EffortChoice[] | undefined, current: string | null | undefined, defaultLabel: string) {
+  const options = (efforts ?? []).map((choice) => ({ value: choice.id, label: effortName[choice.id] ?? choice.name ?? choice.id }));
+  if (current && !options.some((option) => option.value === current)) options.unshift({ value: current, label: effortName[current] ?? current });
+  if (!current) options.unshift({ value: "", label: defaultLabel });
+  return options;
+}
+
 function SessionComposer({ session, running }: { session: SessionInfo; running: boolean }) {
   const capability = useStore((state) => state.description?.capabilities?.[session.runtime]);
-  const [models, setModels] = useState<ModelChoice[]>([]);
-  const [model, setCurrentModel] = useState<string | null>(null);
+  const [state, setState] = useState<ModelState>({});
 
   useEffect(() => {
     let cancelled = false;
-    void sessionModel(session.session_id).then((state) => {
-      if (cancelled || !state) return;
-      setModels(state.models ?? []);
-      setCurrentModel(state.model ?? null);
+    void sessionModel(session.session_id).then((result) => {
+      if (!cancelled && result) setState(result);
     });
     return () => {
       cancelled = true;
     };
   }, [session.session_id]);
 
+  const models = state.models ?? [];
+  const model = state.model ?? null;
+  const efforts = state.efforts?.length ? state.efforts : models.find((choice) => choice.id === model)?.efforts;
   const mode = session.permission_mode ?? "default";
   const modes = capability?.permission_modes?.length ? capability.permission_modes : [mode];
-  // The model list comes from the running agent and can be slow or unavailable; the picker
-  // stays in place and shows what is known.
+  // The lists come from the running agent and can be slow or unavailable; the pickers stay in
+  // place and show what is known.
   const modelOptions = models.map((choice) => ({ value: choice.id, label: choice.name ?? choice.id }));
   if (model && !modelOptions.some((option) => option.value === model)) modelOptions.unshift({ value: model, label: model });
   if (modelOptions.length === 0) modelOptions.push({ value: "", label: "默认模型" });
+
+  async function change(update: { model?: string; effort?: string }) {
+    setState((current) => ({ ...current, ...update }));
+    const result = await setModel(session.session_id, update);
+    // A different model can offer different efforts; read back what now applies.
+    const fresh = result && result.efforts !== undefined ? result : await sessionModel(session.session_id);
+    if (fresh) setState(fresh);
+  }
+
   return (
     <div className="composer-wrap">
       <Composer
@@ -112,15 +137,13 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
         <span className="picker static" title="Agent（会话创建后不能更换）">
           {runtimeName[session.runtime] ?? session.runtime}
         </span>
+        <Picker title="模型" value={model ?? ""} disabled={models.length === 0} options={modelOptions} onChange={(value) => void change({ model: value })} />
         <Picker
-          title="模型"
-          value={model ?? ""}
-          disabled={models.length === 0}
-          options={modelOptions}
-          onChange={(value) => {
-            setCurrentModel(value);
-            void setModel(session.session_id, value);
-          }}
+          title="思考强度"
+          value={state.effort ?? ""}
+          disabled={!efforts?.length}
+          options={effortOptions(efforts, state.effort, "默认强度")}
+          onChange={(value) => void change({ effort: value })}
         />
         <Picker
           title="权限模式"
