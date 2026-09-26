@@ -233,6 +233,7 @@ function DevicePicker() {
   const devices = useStore((state) => state.devices);
   const deviceId = useStore((state) => state.deviceId);
   const peerState = useStore((state) => state.peerState);
+  const devicesLoaded = useStore((state) => state.devicesLoaded);
   const current = devices.find((row) => row.device.id === deviceId);
   const state = peerState === "online" ? "online" : current?.online ? "connecting" : "offline";
   return (
@@ -248,7 +249,7 @@ function DevicePicker() {
           ))}
         </select>
       ) : (
-        <span className="device-name">{current?.device.display_name ?? "没有电脑"}</span>
+        <span className="device-name">{current?.device.display_name ?? (devicesLoaded ? "没有电脑" : "连接中…")}</span>
       )}
       <span className={`dot ${state}`} title={state === "online" ? "已连接" : state === "connecting" ? "连接中" : "离线"} />
     </div>

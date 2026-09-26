@@ -1,8 +1,8 @@
 import { LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { interrupt, loadHistory, resume, send, sessionModel, setModel, setPermissionMode, useStore } from "../store";
+import { continueStored, interrupt, loadHistory, loadModels, send, sessionModel, setModel, setPermissionMode, useStore } from "../store";
 import { emptyTranscript } from "../transcript";
-import type { EffortChoice, LocalSession, ModelState, SessionInfo } from "../types";
+import type { EffortChoice, LocalSession, ModelChoice, ModelState, SessionInfo } from "../types";
 import { Composer, Picker } from "./Composer";
 import { blocks, EntryView } from "./Entries";
 import { effortName, permissionName, runtimeName } from "./labels";
@@ -69,17 +69,75 @@ export function SessionView({ sessionKey, local }: { sessionKey: string; local?:
   );
 }
 
-/** A stored native session continues on its first message: the takeover sends it. */
+/** A stored native session continues on its first message. With every picker on "keep" the
+ *  takeover carries the message and the session keeps its own settings; a changed picker is
+ *  applied after the takeover, before the message is sent. */
 function LocalComposer({ session }: { session: LocalSession }) {
+  const capability = useStore((state) => state.description?.capabilities?.[session.runtime]);
+  const peerState = useStore((state) => state.peerState);
+  const [models, setModels] = useState<ModelChoice[]>([]);
+  const [model, setModelChoice] = useState("");
+  const [effort, setEffort] = useState("");
+  const [mode, setMode] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    if (peerState !== "online") return;
+    void loadModels(session.runtime, session.cwd).then((choices) => {
+      if (!cancelled) setModels(choices);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [session.runtime, session.cwd, peerState]);
+
+  const chosen =
+    models.find((choice) => choice.id === model) ??
+    models.find((choice) => choice.is_default) ??
+    models.find((choice) => choice.id === "default") ??
+    models[0];
+  const efforts = chosen?.efforts ?? [];
+  const modes = capability?.permission_modes ?? [];
+
   return (
     <div className="composer-wrap">
-      <Composer placeholder={`接着这个会话发消息给 ${runtimeName[session.runtime] ?? session.runtime}…`} draftKey={session.runtime_session_id} onSubmit={(text) => void resume(session.runtime_session_id, text)}>
+      <Composer
+        placeholder={`接着这个会话发消息给 ${runtimeName[session.runtime] ?? session.runtime}…`}
+        draftKey={session.runtime_session_id}
+        onSubmit={(text) =>
+          continueStored(session.runtime_session_id, text, {
+            model: model || undefined,
+            effort: effort || undefined,
+            permissionMode: mode || undefined,
+          })
+        }
+      >
         <span className="picker static" title="Agent（会话创建后不能更换）">
           {runtimeName[session.runtime] ?? session.runtime}
         </span>
-        <span className="picker static muted" title="接管后可以切换">
-          沿用原来的模型和权限
-        </span>
+        <Picker
+          title="模型"
+          value={model}
+          options={[{ value: "", label: "沿用原模型" }, ...models.map((choice) => ({ value: choice.id, label: choice.name ?? choice.id }))]}
+          onChange={(value) => {
+            setModelChoice(value);
+            setEffort("");
+          }}
+        />
+        <Picker
+          title="思考强度"
+          value={effort}
+          disabled={efforts.length === 0}
+          options={[{ value: "", label: "沿用原强度" }, ...efforts.map((choice) => ({ value: choice.id, label: effortName[choice.id] ?? choice.name ?? choice.id }))]}
+          onChange={setEffort}
+        />
+        <Picker
+          title="权限模式"
+          value={mode}
+          disabled={modes.length === 0}
+          options={[{ value: "", label: "沿用原权限" }, ...modes.map((value) => ({ value, label: permissionName[value] ?? value }))]}
+          onChange={setMode}
+        />
       </Composer>
     </div>
   );

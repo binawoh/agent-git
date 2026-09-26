@@ -53,6 +53,10 @@ interface State {
   toasts: Toast[];
   models: Record<string, ModelChoice[]>;
   passwordDialog: boolean;
+  /** The device list came from the server in this page, not only from the cache. */
+  devicesLoaded: boolean;
+  connectedOnce: boolean;
+  disconnectedAt: number | null;
 }
 
 export const useStore = create<State>(() => ({
@@ -75,6 +79,9 @@ export const useStore = create<State>(() => ({
   toasts: [],
   models: {},
   passwordDialog: false,
+  devicesLoaded: false,
+  connectedOnce: false,
+  disconnectedAt: null,
 }));
 
 const get = useStore.getState;
@@ -123,13 +130,65 @@ function patchSession(sessionId: string, patch: Partial<SessionInfo>): void {
   set((state) => ({ sessions: state.sessions.map((session) => (session.session_id === sessionId ? { ...session, ...patch } : session)) }));
 }
 
+// ---------------------------------------------------------------------------- cache
+
+// The last catalog is kept in this browser so a reload draws the sidebar at once; the live
+// catalog replaces it as soon as the machine answers.
+const cacheKey = (accountId: string) => `agit.cache.v1.${accountId}`;
+
+function hydrate(accountId: string): void {
+  try {
+    const raw = localStorage.getItem(cacheKey(accountId));
+    if (raw) {
+      const snapshot = JSON.parse(raw);
+      set({
+        deviceId: snapshot.deviceId ?? get().deviceId,
+        devices: snapshot.devices ?? [],
+        description: snapshot.description ?? null,
+        projects: snapshot.projects ?? [],
+        sessions: snapshot.sessions ?? [],
+        local: snapshot.local ?? [],
+        catalogLoaded: Boolean(snapshot.projects?.length),
+      });
+    }
+    const view = sessionStorage.getItem("agit.view");
+    if (view) set({ view: JSON.parse(view) });
+  } catch {
+    // A damaged cache only costs the instant first paint.
+  }
+}
+
+let cacheTimer: ReturnType<typeof setTimeout> | null = null;
+useStore.subscribe((state, previous) => {
+  const changed =
+    state.devices !== previous.devices ||
+    state.projects !== previous.projects ||
+    state.sessions !== previous.sessions ||
+    state.local !== previous.local ||
+    state.description !== previous.description;
+  if (!changed || !state.me || !state.devicesLoaded) return;
+  if (cacheTimer) clearTimeout(cacheTimer);
+  cacheTimer = setTimeout(() => {
+    const { me, deviceId, devices, description, projects, sessions, local } = get();
+    if (!me) return;
+    try {
+      localStorage.setItem(cacheKey(me.account_id), JSON.stringify({ deviceId, devices, description, projects, sessions, local }));
+    } catch {
+      // Storage full or disabled: the page still works without the cache.
+    }
+  }, 1000);
+});
+
 // ---------------------------------------------------------------------------- sign-in and connection
 
 export async function boot(): Promise<void> {
   try {
     const me = await api.me();
     set({ me, authChecked: true });
-    if (me) connect();
+    if (me) {
+      hydrate(me.account_id);
+      connect();
+    }
   } catch (error) {
     set({ authChecked: true });
     toast(`无法连接服务器：${message(error)}`);
@@ -148,6 +207,9 @@ export async function refreshMe(): Promise<void> {
 
 export async function signOut(): Promise<void> {
   rpc.stop();
+  const me = get().me;
+  if (me) localStorage.removeItem(cacheKey(me.account_id));
+  sessionStorage.removeItem("agit.view");
   await api.logout().catch(() => {});
   set({ me: null, devices: [], target: null, projects: [], sessions: [], local: [], transcripts: {}, view: { type: "home" }, catalogLoaded: false });
 }
@@ -155,7 +217,9 @@ export async function signOut(): Promise<void> {
 function connect(): void {
   rpc.onFrame = handleFrame;
   rpc.onState = (connection, everOpened) => {
-    set({ connection });
+    if (connection === "open") set({ connection, connectedOnce: true, disconnectedAt: null });
+    else if (connection === "closed") set({ connection, disconnectedAt: get().disconnectedAt ?? Date.now() });
+    else set({ connection });
     if (connection === "open") void onOpen();
     // A socket that never opens may mean the session ended; check before retrying forever.
     if (connection === "closed" && !everOpened) {
@@ -185,7 +249,7 @@ export async function loadDevices(): Promise<void> {
   if (!devices.some((row) => row.device.id === deviceId)) {
     deviceId = (devices.find((row) => row.online) ?? devices[0])?.device.id ?? null;
   }
-  set({ devices, deviceId });
+  set({ devices, deviceId, devicesLoaded: true });
 }
 
 export async function selectDevice(deviceId: string): Promise<void> {
@@ -315,6 +379,11 @@ export async function bindProject(path: string): Promise<void> {
 
 export function open(view: View): void {
   set({ view, sidebarOpen: false });
+  try {
+    sessionStorage.setItem("agit.view", JSON.stringify(view));
+  } catch {
+    // Restoring the view after a reload is a convenience.
+  }
   void reopenView();
 }
 
@@ -541,8 +610,29 @@ function showPendingPrompt(sessionId: string, prompt: string): void {
   });
 }
 
-/** Takes over a native session; with a prompt, the takeover also sends it as the next turn. */
-export async function resume(nativeId: string, prompt?: string): Promise<boolean> {
+/** Continues a stored native session with a first message. Without overrides the takeover
+ *  carries the message and keeps the session's own settings; otherwise the settings are
+ *  applied after the takeover and before the message is sent. */
+export async function continueStored(
+  nativeId: string,
+  text: string,
+  overrides: { model?: string; effort?: string; permissionMode?: string },
+): Promise<void> {
+  const { model, effort, permissionMode } = overrides;
+  if (!model && !effort && !permissionMode) {
+    await resume(nativeId, text);
+    return;
+  }
+  const session = await resumeSession(nativeId);
+  if (!session) return;
+  if (model || effort) {
+    await setModel(session.session_id, { ...(model ? { model } : {}), ...(effort ? { effort } : {}) });
+  }
+  if (permissionMode) await setPermissionMode(session.session_id, permissionMode);
+  await send(session.session_id, text);
+}
+
+async function resumeSession(nativeId: string, prompt?: string): Promise<SessionInfo | null> {
   try {
     const params: Record<string, unknown> = { workspace_id: WORKSPACE, session_id: nativeId };
     if (prompt) params.prompt = prompt;
@@ -551,11 +641,16 @@ export async function resume(nativeId: string, prompt?: string): Promise<boolean
     if (prompt) showPendingPrompt(session.session_id, prompt);
     open({ type: "session", sessionId: session.session_id });
     scheduleCatalog();
-    return true;
+    return session;
   } catch (error) {
     toast(error instanceof RpcError && error.code === 303 ? "这个会话正在另一个程序里运行，先在那边关掉它再接着聊" : `接管失败：${message(error)}`);
-    return false;
+    return null;
   }
+}
+
+/** Takes over a native session; with a prompt, the takeover also sends it as the next turn. */
+export async function resume(nativeId: string, prompt?: string): Promise<boolean> {
+  return (await resumeSession(nativeId, prompt)) !== null;
 }
 
 export async function setPermissionMode(sessionId: string, mode: string): Promise<void> {

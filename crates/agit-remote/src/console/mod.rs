@@ -45,6 +45,8 @@ const COOKIE_MAX_AGE: u64 = 30 * 24 * 60 * 60;
 const MAX_REQUESTS: usize = 64;
 const MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 const OUTPUT_QUEUE: usize = 256;
+/// Must stay well inside the tab's silence limit, which treats a quiet socket as lost.
+const HEARTBEAT: Duration = Duration::from_secs(20);
 /// With no tab attached for this long, peers are disconnected; tabs reconnect and replay.
 const DETACHED_PEERS: Duration = Duration::from_secs(5 * 60);
 /// Failed sign-ins allowed per window before the endpoint refuses further attempts.
@@ -459,6 +461,22 @@ async fn serve(app: Arc<App>, host: Arc<Host>, session: sessions::Session, socke
             }
         }
     };
+    // Proxies between a browser and this service drop connections that carry nothing; the
+    // heartbeat keeps an idle tab attached and tells the tab its socket is still alive.
+    let heartbeat = {
+        let output = output.clone();
+        async move {
+            let mut ticks =
+                tokio::time::interval_at(tokio::time::Instant::now() + HEARTBEAT, HEARTBEAT);
+            loop {
+                ticks.tick().await;
+                let beat = json!({"jsonrpc":"2.0","method":"console.heartbeat"}).to_string();
+                if output.send(beat).await.is_err() {
+                    return;
+                }
+            }
+        }
+    };
     let notifications = async move {
         loop {
             let frame = match events.recv().await {
@@ -483,6 +501,7 @@ async fn serve(app: Arc<App>, host: Arc<Host>, session: sessions::Session, socke
         _ = writer => {}
         _ = requests => {}
         _ = notifications => {}
+        _ = heartbeat => {}
     }
 }
 

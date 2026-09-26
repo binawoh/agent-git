@@ -1,5 +1,5 @@
 import { Menu, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { displayPath, projectName, projectOfLocal, useStore } from "../store";
 import { NewSession } from "./NewSession";
 import { PasswordDialog } from "./PasswordDialog";
@@ -98,15 +98,38 @@ function TopBar() {
   );
 }
 
+const pageLoadedAt = Date.now();
+
+/** Re-renders every second while a condition that depends on elapsed time is pending. */
+function useTicking(active: boolean): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return now;
+}
+
+/** Brief reconnects stay silent: a banner appears only when a connection is missing for a
+ *  noticeable time, so a reload or a proxy hiccup does not flash an error. */
 function ConnectionBanner() {
   const connection = useStore((state) => state.connection);
+  const connectedOnce = useStore((state) => state.connectedOnce);
+  const disconnectedAt = useStore((state) => state.disconnectedAt);
   const peerState = useStore((state) => state.peerState);
   const peerError = useStore((state) => state.peerError);
   const devices = useStore((state) => state.devices);
-  if (connection !== "open") return <div className="banner">与服务器的连接断开了，正在重连…</div>;
+  const waiting = connection !== "open" || peerState === "connecting";
+  const now = useTicking(waiting);
+  if (connection !== "open") {
+    if (connectedOnce && disconnectedAt && now - disconnectedAt > 2500) return <div className="banner">网络断了一下，正在重新连接…</div>;
+    if (!connectedOnce && now - pageLoadedAt > 4000) return <div className="banner">正在连接服务器…</div>;
+    return null;
+  }
   if (devices.length === 0) return null;
   if (peerState === "offline") return <div className="banner warn">这台电脑现在离线。确认电脑开着，并且 agit daemon 在运行（agit rc start）。</div>;
-  if (peerState === "connecting") return <div className="banner">正在连接电脑…</div>;
+  if (peerState === "connecting") return now - pageLoadedAt > 4000 ? <div className="banner">正在连接电脑…</div> : null;
   if (peerState === "backoff" || peerState === "rejected" || peerState === "stopped")
     return <div className="banner warn">连接电脑失败{peerError ? `：${peerError}` : ""}，正在重试…</div>;
   return null;
@@ -114,10 +137,18 @@ function ConnectionBanner() {
 
 function Home() {
   const devices = useStore((state) => state.devices);
+  const devicesLoaded = useStore((state) => state.devicesLoaded);
   const description = useStore((state) => state.description);
   const projects = useStore((state) => state.projects);
   const peerState = useStore((state) => state.peerState);
   const catalogLoaded = useStore((state) => state.catalogLoaded);
+  if (devices.length === 0 && !devicesLoaded) {
+    return (
+      <div className="empty">
+        <p className="muted">正在连接…</p>
+      </div>
+    );
+  }
   if (devices.length === 0) {
     return (
       <div className="empty">
