@@ -633,6 +633,17 @@ textarea:focus-visible {
   color: var(--muted);
 }
 
+/* A fixed, right-aligned slot keeps the agent marks in one column whatever the age reads. */
+.row-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  width: 4.4em;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .row-time {
   font-variant-numeric: tabular-nums;
 }

@@ -231,7 +231,9 @@ function Group(props: { project: Project | undefined; rows: Row[]; selected: str
               <span className="row-title">{row.title}</span>
               <span className="row-meta">
                 <span className="runtime-mark">{runtimeMark[row.runtime] ?? row.runtime.slice(0, 2)}</span>
-                <RowStatus status={row.status} time={row.time} now={props.now} />
+                <span className="row-status">
+                  <RowStatus status={row.status} time={row.time} now={props.now} />
+                </span>
               </span>
             </button>
           ))}
