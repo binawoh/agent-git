@@ -1,10 +1,13 @@
 # agit
 
-This fork carries the companion client for a self-hosted AgentGit Hub. The Hub
-itself has moved to [binawoh/agentgit-selfhost](https://github.com/binawoh/agentgit-selfhost);
-`selfhost/` and `crates/agit-selfhost` here are the original copy it was extracted
-from and are not maintained. Fork changes stay in this repository; no upstream
-pull request is planned.
+This fork carries the companion client for a self-hosted AgentGit Hub, and
+[agit-remote](crates/agit-remote/README.md), a Web console and relay for driving Claude Code
+and Codex on your computers from a browser. Prebuilt companion builds are on the
+[releases](https://github.com/binawoh/agent-git/releases) page. The Hub itself has moved to
+[binawoh/agentgit-selfhost](https://github.com/binawoh/agentgit-selfhost); `selfhost/` and
+`crates/agit-selfhost` here are the original copy it was extracted from and are not
+maintained. This is an independent fork, not affiliated with Einsia; fork changes stay in this
+repository, and no upstream pull request is planned.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange?logo=rust&logoColor=white)](https://www.rust-lang.org)
