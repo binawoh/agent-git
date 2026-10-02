@@ -1,9 +1,10 @@
 # agit
 
-This fork's headless, single-user Hub work lives on the `selfhost` branch.
-See [the private Hub build and deployment guide](selfhost/RUNBOOK.md).
-The backend implementation is in `crates/agit-selfhost`. Fork changes stay in this
-repository; no upstream pull request is planned.
+This fork carries the companion client for a self-hosted AgentGit Hub. The Hub
+itself has moved to [binawoh/agentgit-selfhost](https://github.com/binawoh/agentgit-selfhost);
+`selfhost/` and `crates/agit-selfhost` here are the original copy it was extracted
+from and are not maintained. Fork changes stay in this repository; no upstream
+pull request is planned.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange?logo=rust&logoColor=white)](https://www.rust-lang.org)
