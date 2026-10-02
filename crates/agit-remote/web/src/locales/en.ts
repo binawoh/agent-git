@@ -43,6 +43,7 @@ export const en = {
     tokenPrompt: "Sign in with a personal access token (PAT) from your Hub.",
     passwordPlaceholder: "Password",
     wrongPassword: "Wrong password",
+    throttled: "Too many failed sign-ins; wait a minute and try again",
     signIn: "Sign in",
     signingIn: "Signing in…",
     useToken: "Forgot the password? Sign in with a token",

@@ -27,7 +27,7 @@ export function Login() {
       await signIn(credential);
     } catch (reason) {
       const text = reason instanceof Error ? reason.message : String(reason);
-      setError(text === "wrong password" ? t.login.wrongPassword : text);
+      setError(text === "wrong password" ? t.login.wrongPassword : text.startsWith("too many failed sign-ins") ? t.login.throttled : text);
     } finally {
       setBusy(false);
     }

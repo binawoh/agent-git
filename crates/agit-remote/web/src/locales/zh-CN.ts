@@ -41,6 +41,7 @@ export const zhCN: Messages = {
     tokenPrompt: "用 Hub 的个人访问令牌（PAT）登录。",
     passwordPlaceholder: "密码",
     wrongPassword: "密码不对",
+    throttled: "登录失败次数太多，请等一分钟再试",
     signIn: "登录",
     signingIn: "登录中…",
     useToken: "忘了密码？用访问令牌登录",
