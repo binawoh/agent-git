@@ -1,0 +1,180 @@
+name: Companion release
+
+# Publishes this fork's companion builds as a GitHub Release: the agit client for Windows,
+# macOS and Linux, and the agit-remote relay and Web console for Linux servers. Both come from
+# one commit, so the client and the relay speak the same protocol. The tag namespace is separate
+# from upstream's agit-v* tags, which drive the upstream release and npm workflows.
+
+on:
+  push:
+    tags: ['companion-v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'An existing companion-v* tag to build and publish again'
+        required: true
+        type: string
+
+concurrency:
+  group: companion-release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  client:
+    name: client ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -Ctarget-feature=+crt-static
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, asset: agit-linux-x64 }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-latest, asset: agit-linux-arm64 }
+          - { target: x86_64-apple-darwin, os: macos-latest, asset: agit-macos-x64 }
+          - { target: aarch64-apple-darwin, os: macos-latest, asset: agit-macos-arm64 }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest, asset: agit-windows-x64.exe }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+      - name: Check the tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RELEASE_TAG" in companion-v*) ;; *) echo "::error::expected a companion-v* tag"; exit 1 ;; esac
+          git tag --points-at HEAD | grep -Fxq "$RELEASE_TAG"
+      - run: rustup target add ${{ matrix.target }}
+      - uses: actions/setup-python@v5
+        if: contains(matrix.target, 'linux-musl')
+        with:
+          python-version: '3.12'
+      - name: Install zig and cargo-zigbuild
+        if: contains(matrix.target, 'linux-musl')
+        run: |
+          pip install ziglang
+          cargo install cargo-zigbuild --locked
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: companion-client-${{ matrix.target }}
+      - name: Build the client
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.target }}" in
+            *linux-musl) cargo zigbuild --locked --release --target "${{ matrix.target }}" --bin agit ;;
+            *) cargo build --locked --release --target "${{ matrix.target }}" --bin agit ;;
+          esac
+          suffix=""
+          case "${{ matrix.target }}" in *windows*) suffix=".exe" ;; esac
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/agit$suffix" "dist/${{ matrix.asset }}"
+      - name: Run the build on its own platform
+        if: matrix.target == 'x86_64-unknown-linux-musl' || matrix.target == 'aarch64-apple-darwin' || matrix.target == 'x86_64-pc-windows-msvc'
+        shell: bash
+        run: dist/${{ matrix.asset }} --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-${{ matrix.target }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  relay:
+    name: relay ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-musl, asset: agit-remote-linux-x64 }
+          - { target: aarch64-unknown-linux-musl, asset: agit-remote-linux-arm64 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build the console's web assets
+        working-directory: crates/agit-remote/web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+      - run: rustup target add ${{ matrix.target }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install zig and cargo-zigbuild
+        run: |
+          pip install ziglang
+          cargo install cargo-zigbuild --locked
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: companion-relay-${{ matrix.target }}
+      - name: Build the relay
+        run: |
+          set -euo pipefail
+          cargo zigbuild --locked --release --target "${{ matrix.target }}" -p agit-remote
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/agit-remote" "dist/${{ matrix.asset }}"
+      - name: Check that the binary is static
+        run: |
+          set -euo pipefail
+          description="$(file -b "dist/${{ matrix.asset }}")"
+          echo "$description"
+          echo "$description" | grep -qE 'static-pie linked|statically linked'
+      - name: Run the build on its own platform
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: dist/${{ matrix.asset }} --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-${{ matrix.target }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  publish:
+    needs: [client, relay]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Write checksums
+        working-directory: dist
+        run: |
+          chmod +x agit-linux-* agit-macos-* agit-remote-linux-*
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > notes.md <<EOF
+          Companion builds of [binawoh/agent-git](https://github.com/${GITHUB_REPOSITORY}), built from \`$(gh api "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_TAG}" --jq .sha)\`.
+
+          - \`agit-*\`: the agit client with this fork's private Hub and Web console support, for Windows, macOS and Linux. It uses the system Git and Git LFS.
+          - \`agit-remote-linux-*\`: the relay and Web console server, a static Linux binary for x64 and ARM64.
+
+          Setup: [Web console and relay](https://github.com/${GITHUB_REPOSITORY}/blob/${RELEASE_TAG}/crates/agit-remote/README.md). Verify downloads with \`sha256sum --check SHA256SUMS\`.
+          EOF
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "$RELEASE_TAG" --notes-file notes.md --verify-tag
+          fi
