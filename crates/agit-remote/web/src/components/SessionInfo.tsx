@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../i18n";
 import { runtimeUsage } from "../store";
 import type { HistoryItem, ModelState, RuntimeCapability, RuntimeUsage } from "../types";
 import type { ExtensionInfo, SlashCommand } from "./Composer";
@@ -258,12 +259,7 @@ function mergeUsage(saved: PlanUsage | null, report: PlanUsage): PlanUsage {
 }
 
 /** Claude Code's windows as a model call reports them, in the order its usage panel lists them. */
-const claudeLimitNames: Record<string, string> = {
-  five_hour: "5 小时限额",
-  seven_day: "每周 · 所有模型",
-  seven_day_opus: "每周 · Opus",
-  seven_day_sonnet: "每周 · Sonnet",
-};
+const claudeLimitNames = t.usage.claudeLimit;
 
 function numberOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -295,11 +291,11 @@ function claudeLimits(usage: Record<string, any> | undefined): LimitWindow[] {
     const scope = limit.scope?.model?.display_name;
     const [key, label] =
       limit.kind === "session"
-        ? ["five_hour", "5 小时限额"]
+        ? ["five_hour", claudeLimitNames.five_hour]
         : limit.kind === "weekly_all"
-          ? ["seven_day", "每周 · 所有模型"]
+          ? ["seven_day", claudeLimitNames.seven_day]
           : typeof scope === "string"
-            ? [`weekly:${scope}`, `每周 · ${scope}`]
+            ? [`weekly:${scope}`, t.usage.weeklyScoped(scope)]
             : [String(limit.kind), String(limit.kind)];
     const resets = typeof limit.resets_at === "string" ? Date.parse(limit.resets_at) / 1000 : NaN;
     return [{ key, label, used: limit.percent / 100, resetsAt: Number.isFinite(resets) ? resets : null }];
@@ -312,16 +308,16 @@ function codexWindow(key: string, window: any): LimitWindow[] {
   const minutes = window.windowDurationMins;
   const label =
     minutes === 300
-      ? "5 小时限额"
+      ? claudeLimitNames.five_hour
       : minutes === 10080
-        ? "每周限额"
+        ? t.usage.weekly
         : typeof minutes === "number" && minutes > 0
           ? minutes % 1440 === 0
-            ? `${minutes / 1440} 天限额`
-            : `${+(minutes / 60).toFixed(1)} 小时限额`
+            ? t.usage.days(minutes / 1440)
+            : t.usage.hours(+(minutes / 60).toFixed(1))
           : key === "primary"
-            ? "短期限额"
-            : "长期限额";
+            ? t.usage.shortTerm
+            : t.usage.longTerm;
   return [{ key, label, used: window.usedPercent / 100, resetsAt: numberOrNull(window.resetsAt) }];
 }
 
@@ -409,8 +405,6 @@ export function useAgentUsage(runtime: string, model: string | null | undefined,
   return { usage, refreshing, refresh: () => refresh(FRESH_SECONDS) };
 }
 
-const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
-
 function clock(date: Date): string {
   return `${date.getHours()}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
@@ -419,25 +413,21 @@ function clock(date: Date): string {
 function resetText(resetsAt: number | null, now: number): string {
   if (resetsAt === null) return "";
   const seconds = resetsAt - now / 1000;
-  if (seconds <= 0) return "已重置";
-  if (seconds < 3600) return `${Math.max(1, Math.floor(seconds / 60))} 分钟后重置`;
-  if (seconds < 86400) {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    return minutes ? `${hours} 小时 ${minutes} 分后重置` : `${hours} 小时后重置`;
-  }
+  if (seconds <= 0) return t.usage.reset;
+  if (seconds < 3600) return t.usage.resetsInMinutes(Math.max(1, Math.floor(seconds / 60)));
+  if (seconds < 86400) return t.usage.resetsInHours(Math.floor(seconds / 3600), Math.floor((seconds % 3600) / 60));
   const date = new Date(resetsAt * 1000);
-  return `${weekdays[date.getDay()]} ${clock(date)} 重置`;
+  return t.usage.resetsAt(date, clock(date));
 }
 
 function observedText(observedAt: number | null, now: number): string {
   if (observedAt === null) return "";
   const age = now / 1000 - observedAt;
-  if (age < 60) return "刚刚更新";
-  if (age < 3600) return `${Math.floor(age / 60)} 分钟前更新`;
+  if (age < 60) return t.usage.updatedJustNow;
+  if (age < 3600) return t.usage.updatedMinutesAgo(Math.floor(age / 60));
   const date = new Date(observedAt * 1000);
   const today = new Date(now).toDateString() === date.toDateString();
-  return today ? `今天 ${clock(date)} 更新` : `${date.getMonth() + 1}月${date.getDate()}日 ${clock(date)} 更新`;
+  return today ? t.usage.updatedToday(clock(date)) : t.usage.updatedOn(date, clock(date));
 }
 
 function tone(share: number | null): string {
@@ -470,11 +460,15 @@ export function UsageRing({ context, usage, refreshing, onOpen }: { context: Con
   const now = Date.now();
   const share = context?.window ? Math.min(1, context.used / context.window) : null;
   const left = context?.window ? Math.max(0, context.window - context.used) : null;
-  const contextText = context ? (context.window ? `${tokens(context.used)} / ${tokens(context.window)}（${Math.round((share ?? 0) * 100)}%）` : tokens(context.used)) : null;
+  const contextText = context
+    ? context.window
+      ? t.usage.contextShare(tokens(context.used), tokens(context.window), Math.round((share ?? 0) * 100))
+      : tokens(context.used)
+    : null;
   const current = usage?.windows.filter((window) => window.resetsAt === null || window.resetsAt * 1000 > now) ?? [];
   const busiest = current.reduce<LimitWindow | null>((top, window) => (!top || window.used > top.used ? window : top), null);
   const title = [
-    contextText && `上下文 ${contextText}${left !== null ? ` · 还剩 ${tokens(left)}` : ""}`,
+    contextText && t.usage.contextTitle(contextText, left !== null ? tokens(left) : null),
     busiest && `${busiest.label} ${Math.round(busiest.used * 100)}% · ${resetText(busiest.resetsAt, now)}`,
   ]
     .filter(Boolean)
@@ -487,7 +481,7 @@ export function UsageRing({ context, usage, refreshing, onOpen }: { context: Con
         type="button"
         className={`context-ring ${tone(share)}`}
         title={title}
-        aria-label={title || "用量"}
+        aria-label={title || t.usage.label}
         onClick={() => {
           if (!open) onOpen?.();
           setOpen(!open);
@@ -511,14 +505,14 @@ export function UsageRing({ context, usage, refreshing, onOpen }: { context: Con
           {context && (
             <section className="usage-section">
               <div className="context-row">
-                <span>上下文窗口</span>
+                <span>{t.usage.contextWindow}</span>
                 <span>{contextText}</span>
               </div>
               {share !== null && <UsageBar share={share} />}
               {left !== null && (
                 <div className="usage-left">
-                  还剩 {tokens(left)}
-                  {share !== null && share > 0.8 ? "，快满时可以用 /compact 压缩对话" : ""}
+                  {t.usage.left(tokens(left))}
+                  {share !== null && share > 0.8 ? t.usage.compactHint : ""}
                 </div>
               )}
             </section>
@@ -526,8 +520,8 @@ export function UsageRing({ context, usage, refreshing, onOpen }: { context: Con
           {(usage || refreshing) && (
             <section className="usage-section">
               <div className="usage-heading">
-                <span>{usage?.plan ? `套餐用量 · ${usage.plan}` : "套餐用量"}</span>
-                <span>{refreshing ? "更新中…" : observedText(usage?.observedAt ?? null, now)}</span>
+                <span>{t.usage.plan(usage?.plan ?? null)}</span>
+                <span>{refreshing ? t.usage.refreshing : observedText(usage?.observedAt ?? null, now)}</span>
               </div>
               {usage?.windows.map((window) => {
                 const over = window.resetsAt !== null && window.resetsAt * 1000 <= now;

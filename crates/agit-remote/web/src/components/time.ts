@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { t } from "../i18n";
 
 /** Re-renders on an interval while `active` and returns the current time. */
 export function useTicking(active: boolean, interval = 1000): number {
@@ -16,12 +17,12 @@ export function useTicking(active: boolean, interval = 1000): number {
 export function ago(time: number, now = Date.now()): string {
   if (!time) return "";
   const minutes = Math.floor((now - time) / 60_000);
-  if (minutes < 1) return "刚刚";
-  if (minutes < 60) return `${minutes}分钟`;
+  if (minutes < 1) return t.time.justNow;
+  if (minutes < 60) return t.time.minutes(minutes);
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}小时`;
+  if (hours < 24) return t.time.hours(hours);
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}天`;
+  if (days < 7) return t.time.days(days);
   const date = new Date(time);
   return date.getFullYear() === new Date(now).getFullYear() ? `${date.getMonth() + 1}/${date.getDate()}` : `${date.getFullYear()}/${date.getMonth() + 1}`;
 }

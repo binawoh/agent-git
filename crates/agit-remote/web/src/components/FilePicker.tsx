@@ -1,5 +1,6 @@
 import { ArrowUp, Check, File as FileIcon, Folder, LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
+import { t } from "../i18n";
 import { displayPath, readDirectory, type DirectoryListing } from "../store";
 
 /** Browses the machine's files, starting in the project, and returns the chosen paths. */
@@ -34,9 +35,9 @@ export function FilePicker(props: { start: string; onPick: (paths: string[]) => 
   return (
     <div className="dialog-backdrop" onClick={props.onClose}>
       <div className="dialog picker-dialog" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === "Escape" && props.onClose()}>
-        <h3>从电脑选择文件</h3>
+        <h3>{t.files.title}</h3>
         <div className="picker-path">
-          <button className="icon-button small" title="上一级" disabled={!parent || parent === here} onClick={() => void go(parent)}>
+          <button className="icon-button small" title={t.files.up} disabled={!parent || parent === here} onClick={() => void go(parent)}>
             <ArrowUp size={14} />
           </button>
           <span title={displayPath(here)}>{displayPath(here)}</span>
@@ -60,12 +61,12 @@ export function FilePicker(props: { start: string; onPick: (paths: string[]) => 
                 </button>
               );
             })}
-          {!loading && listing?.entries.length === 0 && <div className="group-empty">空文件夹</div>}
+          {!loading && listing?.entries.length === 0 && <div className="group-empty">{t.files.empty}</div>}
         </div>
         <div className="dialog-actions">
-          <button onClick={props.onClose}>取消</button>
+          <button onClick={props.onClose}>{t.common.cancel}</button>
           <button className="primary" disabled={!chosen.length} onClick={() => props.onPick(chosen)}>
-            添加 {chosen.length ? `${chosen.length} 个文件` : ""}
+            {t.files.add(chosen.length)}
           </button>
         </div>
       </div>

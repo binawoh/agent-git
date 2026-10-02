@@ -3,6 +3,7 @@ import { isValidElement, memo, useRef, useState, type ComponentProps } from "rea
 import Markdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
+import { t } from "../i18n";
 
 function CodeBlock(props: ComponentProps<"pre">) {
   const ref = useRef<HTMLPreElement>(null);
@@ -20,9 +21,9 @@ function CodeBlock(props: ComponentProps<"pre">) {
     <div className="code-block">
       <div className="code-header">
         <span>{language ?? ""}</span>
-        <button type="button" className="copy" onClick={() => void copy()} title="复制">
+        <button type="button" className="copy" onClick={() => void copy()} title={t.common.copy}>
           {copied ? <Check size={13} /> : <Copy size={13} />}
-          <span>{copied ? "已复制" : "复制"}</span>
+          <span>{copied ? t.common.copied : t.common.copy}</span>
         </button>
       </div>
       <pre ref={ref} {...rest}>

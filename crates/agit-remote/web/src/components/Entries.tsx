@@ -22,6 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { t } from "../i18n";
 import { decide } from "../store";
 import type { Entry } from "../transcript";
 import { MarkdownText } from "./Markdown";
@@ -118,10 +119,10 @@ function describeUncached(entry: ToolEntry): StepView {
   let title = entry.summary;
   if (command) target = title = command.split("\n")[0];
   else if (files.length) {
-    target = files.length > 1 ? `${shortPath(files[0])} 等 ${files.length} 个文件` : shortPath(files[0]);
+    target = files.length > 1 ? t.steps.filesTarget(shortPath(files[0]), files.length) : shortPath(files[0]);
     title = files.join("\n");
   } else if (kind === "read" || kind === "edit" || kind === "write") target = shortPath(entry.summary);
-  else if (todos) target = `${todos.filter((todo) => todo.status === "completed").length}/${todos.length} 已完成`;
+  else if (todos) target = t.steps.todosDone(todos.filter((todo) => todo.status === "completed").length, todos.length);
   return { kind, verb: stepVerb(kind, entry.tool), target, title, input, command, diff, todos };
 }
 
@@ -175,9 +176,9 @@ function Steps({ entries, live }: { entries: Step[]; live?: boolean }) {
     <div className={`steps ${expanded ? "expanded" : ""}`}>
       <button type="button" className="steps-summary" aria-expanded={expanded} onClick={() => setOpen(!expanded)}>
         <span className="step-icon">{active ? <LoaderCircle size={15} className="spin" /> : main ? kindIcon(main) : <Lightbulb size={15} />}</span>
-        <span className="steps-text">{summary || `${entries.length} 个步骤`}</span>
+        <span className="steps-text">{summary || t.steps.stepCount(entries.length)}</span>
         {(added > 0 || removed > 0) && <DiffStat added={added} removed={removed} />}
-        {failed && <span className="step-failed">有失败</span>}
+        {failed && <span className="step-failed">{t.steps.someFailed}</span>}
         <ChevronRight size={14} className="chevron" />
       </button>
       {expanded && <div className="timeline">{rows}</div>}
@@ -197,7 +198,7 @@ function ToolRow({ entry, view }: { entry: ToolEntry; view: StepView }) {
           {view.target}
         </span>
         {view.diff && <DiffStat added={view.diff.added} removed={view.diff.removed} />}
-        {entry.failed && <span className="step-failed">失败</span>}
+        {entry.failed && <span className="step-failed">{t.steps.failed}</span>}
         {detail && <ChevronRight size={14} className="chevron" />}
       </button>
       {open && <StepDetail entry={entry} view={view} />}
@@ -231,7 +232,7 @@ function ReasoningRow({ entry }: { entry: ReasoningEntry }) {
     <div className={`step reasoning ${open ? "open" : ""}`}>
       <button type="button" className="step-head" aria-expanded={open} disabled={!entry.text} onClick={() => setOpen(!open)}>
         <span className="step-icon">{entry.streaming ? <LoaderCircle size={15} className="spin" /> : <Lightbulb size={15} />}</span>
-        <span className="step-verb">思考</span>
+        <span className="step-verb">{t.steps.thinking}</span>
         <span className="step-target thought">{first}</span>
         {entry.text && <ChevronRight size={14} className="chevron" />}
       </button>
@@ -299,18 +300,9 @@ function TodoList({ todos }: { todos: Todo[] }) {
 
 // ---------------------------------------------------------------------------- approvals
 
-const approvalTitle: Record<string, string> = {
-  exec: "要运行这条命令吗？",
-  file_change: "要修改这些文件吗？",
-  permission_escalation: "需要更高的权限",
-};
+const approvalTitle = t.approval.title;
 
-const decidedText: Record<string, string> = {
-  allow: "已允许",
-  allow_session: "已允许（本会话）",
-  deny: "已拒绝",
-  expired: "已失效",
-};
+const decidedText = t.approval.decided;
 
 function preview(input: unknown): string {
   if (typeof input === "string") return input;
@@ -343,7 +335,7 @@ function ApprovalCard({ sessionId, entry }: { sessionId: string; entry: Extract<
     <div className={`approval ${entry.decided ? "decided" : ""}`}>
       <div className="approval-head">
         <ShieldAlert size={16} />
-        <span className="approval-title">{approvalTitle[request.kind] ?? "需要你确认"}</span>
+        <span className="approval-title">{approvalTitle[request.kind] ?? t.approval.fallbackTitle}</span>
         {request.tool && <span className="tag">{request.tool}</span>}
       </div>
       {request.summary && request.summary !== command && <div className="approval-summary">{request.summary}</div>}
@@ -363,15 +355,15 @@ function ApprovalCard({ sessionId, entry }: { sessionId: string; entry: Extract<
       ) : (
         <div className="approval-actions">
           <button type="button" className="primary" disabled={busy} onClick={() => void act("allow")}>
-            允许
+            {t.approval.allow}
           </button>
           {request.can_allow_for_session && request.suggested_permission_mode && (
             <button type="button" disabled={busy} onClick={() => void act("allow", "session")}>
-              本会话都允许
+              {t.approval.allowSession}
             </button>
           )}
           <button type="button" className="danger" disabled={busy} onClick={() => void act("deny")}>
-            拒绝
+            {t.approval.deny}
           </button>
         </div>
       )}

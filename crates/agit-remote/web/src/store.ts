@@ -2,6 +2,7 @@
 // the executor's owner RPC is reached through `peer.request`.
 import { create } from "zustand";
 import * as api from "./api";
+import { attachmentHeadings, t } from "./i18n";
 import { Rpc, RpcError, type ConnectionState } from "./rpc";
 import { applyFrame, emptyTranscript, mergeHistory, settleLive, type Entry, type Transcript } from "./transcript";
 import type {
@@ -118,7 +119,7 @@ export function setSidebarCollapsed(collapsed: boolean): void {
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export function projectName(project: Pick<Project, "local_path"> | undefined): string {
-  if (!project) return "未分组";
+  if (!project) return t.store.ungrouped;
   const path = displayPath(project.local_path);
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
@@ -207,7 +208,7 @@ export async function boot(): Promise<void> {
     }
   } catch (error) {
     set({ authChecked: true });
-    toast(`无法连接服务器：${message(error)}`);
+    toast(t.store.cannotConnect(message(error)));
   }
 }
 
@@ -319,7 +320,7 @@ async function attachPeer(): Promise<void> {
 export async function request<T = any>(method: string, params: unknown = {}, timeoutMs = 90_000): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     const target = get().target;
-    if (!target) throw new Error("电脑未连接");
+    if (!target) throw new Error(t.store.machineNotConnected);
     try {
       return await rpc.call<T>("peer.request", { ...target, method, params, timeout_ms: timeoutMs });
     } catch (error) {
@@ -358,7 +359,7 @@ export async function refreshCatalog(): Promise<void> {
       catalogLoaded: true,
     });
   } catch (error) {
-    toast(`读取会话列表失败：${message(error)}`);
+    toast(t.store.listFailed(message(error)));
   }
 }
 
@@ -463,7 +464,7 @@ async function subscribe(sessionId: string): Promise<void> {
     const result = await request<{ session: SessionInfo }>("session.subscribe", { session_id: sessionId, after_seq: afterSeq });
     patchSession(sessionId, result.session);
   } catch (error) {
-    toast(`订阅会话失败：${message(error)}`);
+    toast(t.store.followFailed(message(error)));
   }
 }
 
@@ -543,7 +544,7 @@ function handleFrame(frame: Frame): void {
   }
   if (inner.method === "approval.request") {
     const view = get().view;
-    if (!(view.type === "session" && view.sessionId === key)) toast(`「${info?.title ?? info?.gist ?? "会话"}」在等你审批`, "info");
+    if (!(view.type === "session" && view.sessionId === key)) toast(t.store.awaitingApproval(info?.title ?? info?.gist ?? null), "info");
   }
 }
 
@@ -574,7 +575,7 @@ export async function send(sessionId: string, text: string): Promise<void> {
       }
       updateTranscript(sessionId, (transcript) => ({
         live: transcript.live.map((entry): Entry =>
-          entry.type === "user" && entry.clientId === clientId ? { type: "notice", id: entry.id, text: `发送失败：${text}`, tone: "error" } : entry,
+          entry.type === "user" && entry.clientId === clientId ? { type: "notice", id: entry.id, text: t.store.sendFailed(text), tone: "error" } : entry,
         ),
       }));
       return;
@@ -586,7 +587,7 @@ export async function interrupt(sessionId: string): Promise<void> {
   try {
     await request("turn.interrupt", { session_id: sessionId });
   } catch (error) {
-    toast(`中断失败：${message(error)}`);
+    toast(t.store.stopFailed(message(error)));
   }
 }
 
@@ -600,7 +601,7 @@ export async function decide(sessionId: string, approvalId: string, decision: "a
     mark(decision === "allow" ? (scope === "session" ? "allow_session" : "allow") : "deny");
   } catch (error) {
     if (error instanceof RpcError && error.code === 306) mark("expired");
-    else toast(`审批失败：${message(error)}`);
+    else toast(t.store.approvalFailed(message(error)));
   }
 }
 
@@ -690,7 +691,7 @@ async function resumeSession(nativeId: string, prompt?: string): Promise<Session
     return session;
   } catch (error) {
     updateTranscript(nativeId, (transcript) => ({ live: transcript.live.filter((entry) => !(entry.type === "user" && entry.pending)) }));
-    toast(error instanceof RpcError && error.code === 303 ? "这个会话正在另一个程序里运行，先在那边关掉它再接着聊" : `接管失败：${message(error)}`);
+    toast(error instanceof RpcError && error.code === 303 ? t.store.busyElsewhere : t.store.takeoverFailed(message(error)));
     return null;
   }
 }
@@ -705,7 +706,7 @@ export async function setPermissionMode(sessionId: string, mode: string): Promis
     await request("session.setPermissionMode", { session_id: sessionId, mode });
     patchSession(sessionId, { permission_mode: mode });
   } catch (error) {
-    toast(`切换权限模式失败：${message(error)}`);
+    toast(t.store.modeFailed(message(error)));
   }
 }
 
@@ -745,9 +746,9 @@ export async function sessionCommands(sessionId: string): Promise<{ name: string
 export async function runCommand(sessionId: string, name: string): Promise<void> {
   try {
     await request("session.command", { session_id: sessionId, name });
-    toast(`已执行 /${name}`, "info");
+    toast(t.store.commandDone(name), "info");
   } catch (error) {
-    toast(`/${name} 执行失败：${message(error)}`);
+    toast(t.store.commandFailed(name, message(error)));
   }
 }
 
@@ -781,7 +782,7 @@ export async function setModel(sessionId: string, change: { model?: string; effo
         await sleep(1000);
         continue;
       }
-      toast(`切换${change.effort !== undefined ? "思考强度" : "模型"}失败：${message(error)}`);
+      toast(change.effort !== undefined ? t.store.effortFailed(message(error)) : t.store.modelFailed(message(error)));
       return null;
     }
   }
@@ -804,11 +805,11 @@ const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 /** Saves a file from this device into the project on the machine and returns its path there. */
 export async function uploadFile(projectId: string, file: File): Promise<string> {
-  if (file.size > MAX_UPLOAD_BYTES) throw new Error(`${file.name} 超过 5 MB`);
+  if (file.size > MAX_UPLOAD_BYTES) throw new Error(t.store.tooLarge(file.name));
   const base64 = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");
-    reader.onerror = () => reject(reader.error ?? new Error("读取文件失败"));
+    reader.onerror = () => reject(reader.error ?? new Error(t.store.readFileFailed));
     reader.readAsDataURL(file);
   });
   const name = file.name || `pasted-${Date.now()}.png`;
@@ -819,17 +820,21 @@ export async function uploadFile(projectId: string, file: File): Promise<string>
 /** Appends attached file paths to a message in a form both agents follow. */
 export function withAttachments(text: string, paths: string[]): string {
   if (!paths.length) return text;
-  return `${text}\n\n附件（电脑上的文件，请直接读取）：\n${paths.map((path) => `- ${displayPath(path)}`).join("\n")}`;
+  return `${text}\n\n${t.composer.attachmentHeading}\n${paths.map((path) => `- ${displayPath(path)}`).join("\n")}`;
 }
 
-const ATTACHMENT_HEADING = "附件（电脑上的文件，请直接读取）：";
-
-/** Splits a message written by `withAttachments` back into its text and attached paths. */
+/** Splits a message written by `withAttachments`, in any interface language, back into its text
+ *  and attached paths. */
 export function splitAttachments(message: string): { text: string; paths: string[] } {
-  const at = message.lastIndexOf(`\n\n${ATTACHMENT_HEADING}\n`);
+  let at = -1;
+  let heading = "";
+  for (const candidate of attachmentHeadings) {
+    const index = message.lastIndexOf(`\n\n${candidate}\n`);
+    if (index > at) [at, heading] = [index, candidate];
+  }
   if (at < 0) return { text: message, paths: [] };
   const paths = message
-    .slice(at + ATTACHMENT_HEADING.length + 3)
+    .slice(at + heading.length + 3)
     .split("\n")
     .map((line) => line.replace(/^- /, "").trim())
     .filter(Boolean);

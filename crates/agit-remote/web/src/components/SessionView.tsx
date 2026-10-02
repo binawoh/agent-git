@@ -1,5 +1,6 @@
 import { ArrowDown, Clock, Eye, LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n";
 import { continueStored, interrupt, loadHistory, loadModels, nativeRecords, projectOfLocal, runCommand, send, sessionCommands, sessionModel, setModel, setPermissionMode, useStore } from "../store";
 import { emptyTranscript } from "../transcript";
 import type { LocalSession, ModelChoice, ModelState, SessionInfo } from "../types";
@@ -50,13 +51,13 @@ export function SessionView({ sessionKey, local }: { sessionKey: string; local?:
       <div className="conversation-area">
         <div className="conversation" ref={scroller} onScroll={onScroll}>
           <div className="column">
-            {transcript.loadingEarlier && <div className="loading-more">加载更早的消息…</div>}
+            {transcript.loadingEarlier && <div className="loading-more">{t.session.loadingEarlier}</div>}
             {transcript.loading && !transcript.loaded && (
               <div className="loading">
                 <LoaderCircle size={18} className="spin" />
               </div>
             )}
-            {transcript.error && <div className="notice error">读取记录失败：{transcript.error}</div>}
+            {transcript.error && <div className="notice error">{t.session.loadFailed(transcript.error)}</div>}
             {entries.map((block, index) => (
               <EntryView key={block.id} block={block} sessionId={sessionKey} live={running && index === entries.length - 1} />
             ))}
@@ -64,7 +65,7 @@ export function SessionView({ sessionKey, local }: { sessionKey: string; local?:
           </div>
         </div>
         {!atBottom && (
-          <button type="button" className="jump-bottom" title="回到底部" aria-label="回到底部" onClick={toBottom}>
+          <button type="button" className="jump-bottom" title={t.session.toBottom} aria-label={t.session.toBottom} onClick={toBottom}>
             <ArrowDown size={16} />
           </button>
         )}
@@ -93,7 +94,7 @@ function Working({ awaiting, since }: { awaiting: boolean; since: number | null 
   return (
     <div className={`working ${awaiting ? "awaiting" : ""}`}>
       {awaiting ? <span className="working-dot" /> : <LoaderCircle size={15} className="spin" />}
-      <span>{awaiting ? "等待你审批" : "正在工作…"}</span>
+      <span>{awaiting ? t.session.awaiting : t.session.working}</span>
       {!awaiting && <span className="working-time">{elapsed(now - start)}</span>}
     </div>
   );
@@ -154,7 +155,7 @@ function LocalComposer({ session }: { session: LocalSession }) {
   return (
     <div className="composer-wrap">
       <Composer
-        placeholder={`接着这个会话发消息给 ${runtimeName[session.runtime] ?? session.runtime}…`}
+        placeholder={t.session.continuePlaceholder(runtimeName[session.runtime] ?? session.runtime)}
         draftKey={session.runtime_session_id}
         attach={attach}
         onSubmit={(text) =>
@@ -171,8 +172,8 @@ function LocalComposer({ session }: { session: LocalSession }) {
           <>
             <ModelPicker
               value={model}
-              display={model ? undefined : ownModel ?? "原模型"}
-              options={[{ value: "", label: ownModel ? `沿用原模型（${ownModel}）` : "沿用原模型", description: "保持这个会话原来的模型" }, ...modelOptions(models)]}
+              display={model ? undefined : ownModel ?? t.session.keptModelShort}
+              options={[{ value: "", label: t.session.keepModel(ownModel), description: t.session.keepModelHint }, ...modelOptions(models)]}
               onChange={(value) => {
                 setModelChoice(value);
                 setEffort("");
@@ -180,9 +181,9 @@ function LocalComposer({ session }: { session: LocalSession }) {
             />
             <EffortPicker
               value={effort}
-              display={effort ? undefined : ownEffort ?? "原强度"}
+              display={effort ? undefined : ownEffort ?? t.session.keptEffortShort}
               disabled={efforts.length === 0}
-              options={[{ value: "", label: ownEffort ? `沿用原强度（${ownEffort}）` : "沿用原强度", description: "保持这个会话原来的思考强度" }, ...effortOptions(efforts)]}
+              options={[{ value: "", label: t.session.keepEffort(ownEffort), description: t.session.keepEffortHint }, ...effortOptions(efforts)]}
               onChange={setEffort}
             />
             {(context || agentUsage.usage) && <UsageRing context={context} usage={agentUsage.usage} refreshing={agentUsage.refreshing} onOpen={agentUsage.refresh} />}
@@ -254,13 +255,13 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
   // place and show what is known.
   const modelChoices = modelOptions(models);
   if (model && !modelChoices.some((option) => option.value === model)) modelChoices.unshift({ value: model, label: model });
-  if (modelChoices.length === 0) modelChoices.push({ value: "", label: "默认模型" });
+  if (modelChoices.length === 0) modelChoices.push({ value: "", label: t.common.defaultModel });
   const effort = state.effort ?? "";
   const ownEffort = !effort && recorded.effort ? effortName[recorded.effort] ?? recorded.effort : null;
   const effortChoices = effortOptions(efforts);
   if (effort && !effortChoices.some((option) => option.value === effort)) effortChoices.unshift({ value: effort, label: effortName[effort] ?? effort });
-  if (!effort) effortChoices.unshift({ value: "", label: "默认强度" });
-  const note = queued ? "这一轮结束后切换" : undefined;
+  if (!effort) effortChoices.unshift({ value: "", label: t.common.defaultEffort });
+  const note = queued ? t.session.afterTurn : undefined;
 
   useEffect(() => {
     if (running || !queued) return;
@@ -287,7 +288,7 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
   return (
     <div className="composer-wrap">
       <Composer
-        placeholder={running ? "补充说明，会在合适的时机交给 agent…" : `发消息给 ${runtimeName[session.runtime] ?? session.runtime}…`}
+        placeholder={running ? t.session.steerPlaceholder : t.session.messagePlaceholder(runtimeName[session.runtime] ?? session.runtime)}
         running={running}
         draftKey={session.session_id}
         onSubmit={submit}
@@ -299,15 +300,15 @@ function SessionComposer({ session, running }: { session: SessionInfo; running: 
         right={
           <>
             {queued && (
-              <span className="pending-note" title="模型或思考强度会在这一轮结束后切换">
+              <span className="pending-note" title={t.session.pendingTitle}>
                 <Clock size={12} />
-                <span>稍后生效</span>
+                <span>{t.session.pending}</span>
               </span>
             )}
             <ModelPicker value={model ?? ""} options={modelChoices} disabled={models.length === 0} note={note} onChange={(value) => void change({ model: value })} />
             <EffortPicker
               value={effort}
-              display={effort ? undefined : ownEffort ?? "默认"}
+              display={effort ? undefined : ownEffort ?? t.common.defaultShort}
               options={effortChoices}
               disabled={!efforts?.length}
               note={note}
@@ -332,12 +333,9 @@ function ReleaseNote({ modifiedAt }: { modifiedAt: string }) {
   const left = Math.max(0, RELEASE_SECONDS - quiet);
   return (
     <span>
-      这个会话正在电脑上的其他程序里运行，这里只能查看，内容每 4 秒刷新。
-      {quiet < 5
-        ? "它刚刚还在写入。"
-        : left > 0
-          ? `最后一次写入在 ${quiet} 秒前，再没有写入的话约 ${left} 秒后就能在这里接着聊。`
-          : "已经停止写入，马上就能接着聊。"}
+      {t.session.readonly}
+      {t.sentenceGap}
+      {quiet < 5 ? t.session.stillWriting : left > 0 ? t.session.releaseIn(quiet, left) : t.session.released}
     </span>
   );
 }

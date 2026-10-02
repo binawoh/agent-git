@@ -1,6 +1,8 @@
 // How tool calls read in the transcript: what kind of work each is, a verb and target for its
 // row, a summary for a run of steps, and the diff of a file change.
 
+import { t } from "../i18n";
+
 export type StepKind = "command" | "read" | "edit" | "write" | "search" | "web" | "agent" | "todo" | "plan" | "mcp" | "result" | "other";
 
 export function stepKind(tool: string): StepKind {
@@ -20,27 +22,28 @@ export function stepKind(tool: string): StepKind {
 }
 
 export function stepVerb(kind: StepKind, tool: string): string {
+  const verb = t.steps.verb;
   switch (kind) {
     case "command":
-      return "运行";
+      return verb.command;
     case "read":
-      return "读取";
+      return verb.read;
     case "edit":
-      return "编辑";
+      return verb.edit;
     case "write":
-      return "写入";
+      return verb.write;
     case "search":
-      return "搜索";
+      return verb.search;
     case "web":
-      return /search/i.test(tool) ? "搜索网页" : "打开网页";
+      return /search/i.test(tool) ? verb.webSearch : verb.webOpen;
     case "agent":
-      return "子任务";
+      return verb.agent;
     case "todo":
-      return "更新待办";
+      return verb.todo;
     case "plan":
-      return "提交计划";
+      return verb.plan;
     case "result":
-      return "结果";
+      return verb.result;
     case "mcp": {
       const [, server, name] = tool.split("__");
       return name ? `${server} · ${name}` : tool;
@@ -149,7 +152,7 @@ function trimContext(lines: DiffLine[]): DiffLine[] {
     const keepTail = last ? 0 : CONTEXT;
     if (run.length > keepHead + keepTail + 1) {
       result.push(...run.slice(0, keepHead));
-      result.push({ type: "gap", text: `${run.length - keepHead - keepTail} 行未改动` });
+      result.push({ type: "gap", text: t.steps.unchanged(run.length - keepHead - keepTail) });
       result.push(...run.slice(run.length - keepTail));
     } else result.push(...run);
     run = [];
@@ -188,7 +191,7 @@ function finish(lines: DiffLine[]): Diff | null {
   if (!lines.some((line) => line.type === "add" || line.type === "del")) return null;
   const added = lines.filter((line) => line.type === "add").length;
   const removed = lines.filter((line) => line.type === "del").length;
-  const shown = lines.length > MAX_LINES ? [...lines.slice(0, MAX_LINES), { type: "gap" as const, text: `还有 ${lines.length - MAX_LINES} 行` }] : lines;
+  const shown = lines.length > MAX_LINES ? [...lines.slice(0, MAX_LINES), { type: "gap" as const, text: t.steps.moreLines(lines.length - MAX_LINES) }] : lines;
   return { lines: shown, added, removed };
 }
 
@@ -218,15 +221,16 @@ export function diffOf(input: unknown): Diff | null {
 
 // ---------------------------------------------------------------------------- summaries
 
+const phrase = t.steps.summary;
 const summaryPhrases: [StepKind[], (count: number) => string][] = [
-  [["read"], (count) => `读取了 ${count} 个文件`],
-  [["edit", "write"], (count) => `修改了 ${count} 个文件`],
-  [["command"], (count) => `运行了 ${count} 条命令`],
-  [["search"], (count) => `搜索了 ${count} 次`],
-  [["web"], (count) => `查看了 ${count} 个网页`],
-  [["agent"], (count) => `派出了 ${count} 个子任务`],
-  [["todo", "plan"], () => "更新了计划"],
-  [["mcp", "other", "result"], (count) => `调用了 ${count} 次工具`],
+  [["read"], phrase.read],
+  [["edit", "write"], phrase.edit],
+  [["command"], phrase.command],
+  [["search"], phrase.search],
+  [["web"], phrase.web],
+  [["agent"], phrase.agent],
+  [["todo", "plan"], phrase.plan],
+  [["mcp", "other", "result"], phrase.tool],
 ];
 
 /** One line for a run of steps, naming at most three kinds of work with their counts. A file
@@ -240,6 +244,6 @@ export function summarize(steps: { kind: StepKind | "reasoning"; target: string 
     const unnamed = matching.filter((step) => !step.target).length;
     parts.push(phrase(files ? new Set(matching.flatMap((step) => (step.target ? [step.target] : []))).size + unnamed : matching.length));
   }
-  if (!parts.length) return steps.some((step) => step.kind === "reasoning") ? "思考" : "";
-  return parts.length > 3 ? `${parts.slice(0, 3).join("，")}等` : parts.join("，");
+  if (!parts.length) return steps.some((step) => step.kind === "reasoning") ? t.steps.thinking : "";
+  return t.steps.joinSummary(parts.slice(0, 3), parts.length > 3);
 }

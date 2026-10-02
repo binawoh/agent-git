@@ -3,6 +3,7 @@
 // History (`session.history`) is the canonical transcript for both runtimes. Live events give
 // immediacy: streamed assistant text, tool calls and approvals appear as they happen, and
 // the next history load replaces them once the native transcript has the finished turn.
+import { t } from "./i18n";
 import type { ApprovalRequest, Frame, HistoryItem } from "./types";
 
 export type Entry =
@@ -163,7 +164,7 @@ export function fromHistory(items: HistoryItem[]): Entry[] {
         break;
       }
       case "compact_summary":
-        entries.push({ type: "notice", id: item.item_id, text: "上下文已压缩", tone: "info" });
+        entries.push({ type: "notice", id: item.item_id, text: t.transcript.compacted, tone: "info" });
         break;
     }
   }
@@ -278,8 +279,8 @@ export function applyFrame(transcript: Transcript, frame: Frame, runtime: string
         if ("streaming" in entry && entry.streaming) live[index] = { ...entry, streaming: false } as Entry;
         if (entry.type === "approval" && !entry.decided) live[index] = { ...entry, decided: "expired" };
       }
-      if (params.outcome === "error") live.push({ type: "notice", id: `error:${frame.seq}`, text: params.error ?? "本轮出错", tone: "error" });
-      if (params.outcome === "interrupted") live.push({ type: "notice", id: `interrupted:${frame.seq}`, text: "已中断", tone: "info" });
+      if (params.outcome === "error") live.push({ type: "notice", id: `error:${frame.seq}`, text: params.error ?? t.transcript.turnFailed, tone: "error" });
+      if (params.outcome === "interrupted") live.push({ type: "notice", id: `interrupted:${frame.seq}`, text: t.transcript.interrupted, tone: "info" });
       return true;
     default:
       return typeof frame.seq === "number";

@@ -1,5 +1,6 @@
 import { ArrowUp, ChevronLeft, ChevronRight, File as FileIcon, FolderOpen, Image as ImageIcon, LoaderCircle, Paperclip, Plug, Plus, Server, Slash, Square, X } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { t } from "../i18n";
 import { readImage, toast, uploadFile, withAttachments } from "../store";
 import { FilePicker } from "./FilePicker";
 import { ActionMenu } from "./Menu";
@@ -98,7 +99,7 @@ export function Composer(props: {
         setFiles((current) => current.map((item) => (item.key === key ? { ...item, path: saved } : item)));
       } catch (error) {
         setFiles((current) => current.filter((item) => item.key !== key));
-        toast(`上传失败：${error instanceof Error ? error.message : String(error)}`);
+        toast(t.composer.uploadFailed(error instanceof Error ? error.message : String(error)));
       }
     }
   }
@@ -147,7 +148,7 @@ export function Composer(props: {
 
   async function submit() {
     const paths = files.flatMap((file) => (file.path ? [file.path] : []));
-    const value = text.trim() || (paths.length ? "请看附件。" : "");
+    const value = text.trim() || (paths.length ? t.composer.seeAttachments : "");
     if (!value || props.disabled || sending || uploading) return;
     setSending(true);
     setText("");
@@ -197,7 +198,7 @@ export function Composer(props: {
         {files.length > 0 && (
           <div className="attachments">
             {files.map((file) => (
-              <span key={file.key} className={`attachment ${file.path ? "" : "uploading"}`} title={file.path ?? "上传中…"}>
+              <span key={file.key} className={`attachment ${file.path ? "" : "uploading"}`} title={file.path ?? t.composer.uploading}>
                 {imageName.test(file.name) || file.preview ? (
                   <Thumbnail file={file} />
                 ) : file.path === null ? (
@@ -209,7 +210,7 @@ export function Composer(props: {
                 <button
                   type="button"
                   className="attachment-remove"
-                  title="移除"
+                  title={t.common.remove}
                   onClick={() => setFiles((current) => current.filter((item) => item.key !== file.key))}
                 >
                   <X size={12} />
@@ -219,7 +220,7 @@ export function Composer(props: {
           </div>
         )}
         {slashOpen && (
-          <div className="slash-menu" role="listbox" aria-label="斜杠命令">
+          <div className="slash-menu" role="listbox" aria-label={t.composer.slashCommands}>
             {slashMatches.map((command, index) => (
               <button
                 type="button"
@@ -250,11 +251,11 @@ export function Composer(props: {
           onKeyDown={keyDown}
         />
           {props.running && props.onStop && !canSend ? (
-              <button type="button" className="send-button stop" title="中断" aria-label="中断" onClick={props.onStop}>
+              <button type="button" className="send-button stop" title={t.composer.stop} aria-label={t.composer.stop} onClick={props.onStop}>
                 <Square size={11} fill="currentColor" strokeWidth={0} />
               </button>
             ) : (
-              <button type="button" className={`send-button ${canSend ? "ready" : ""}`} title="发送" aria-label="发送" disabled={!canSend} onClick={() => void submit()}>
+              <button type="button" className={`send-button ${canSend ? "ready" : ""}`} title={t.composer.send} aria-label={t.composer.send} disabled={!canSend} onClick={() => void submit()}>
                 <ArrowUp size={17} strokeWidth={2.4} />
               </button>
             )}
@@ -266,16 +267,16 @@ export function Composer(props: {
               <ActionMenu
                 placement="top"
                 trigger={(open, toggle) => (
-                  <button type="button" className={`toolbar-icon ${open ? "active" : ""}`} title="添加文件" aria-label="添加文件" onClick={toggle}>
+                  <button type="button" className={`toolbar-icon ${open ? "active" : ""}`} title={t.composer.attach} aria-label={t.composer.attach} onClick={toggle}>
                     <Plus size={18} />
                   </button>
                 )}
                 items={[
-                  { label: "添加文件或照片", description: "从这台设备上传，最大 5 MB", icon: <Paperclip size={15} />, onSelect: () => input.current?.click() },
-                  { label: "从电脑选择文件", description: "直接引用电脑上的文件", icon: <FolderOpen size={15} />, onSelect: () => setBrowsing(true) },
-                  ...(props.commands?.length ? [{ label: "斜杠命令", icon: <Slash size={15} />, onSelect: startSlash }] : []),
-                  ...(props.extensions ? [{ label: "MCP 服务器", icon: <Server size={15} />, onSelect: () => setPanel("mcp") }] : []),
-                  ...(props.extensions ? [{ label: "插件", icon: <Plug size={15} />, onSelect: () => setPanel("plugins") }] : []),
+                  { label: t.composer.upload, description: t.composer.uploadHint, icon: <Paperclip size={15} />, onSelect: () => input.current?.click() },
+                  { label: t.composer.pick, description: t.composer.pickHint, icon: <FolderOpen size={15} />, onSelect: () => setBrowsing(true) },
+                  ...(props.commands?.length ? [{ label: t.composer.slashCommands, icon: <Slash size={15} />, onSelect: startSlash }] : []),
+                  ...(props.extensions ? [{ label: t.composer.mcpServers, icon: <Server size={15} />, onSelect: () => setPanel("mcp") }] : []),
+                  ...(props.extensions ? [{ label: t.composer.plugins, icon: <Plug size={15} />, onSelect: () => setPanel("plugins") }] : []),
                 ]}
               />
             )}
@@ -330,7 +331,7 @@ function Thumbnail({ file }: { file: Attachment }) {
   if (!url) return file.path === null ? <LoaderCircle size={13} className="spin" /> : <ImageIcon size={13} />;
   return (
     <>
-      <button type="button" className="attachment-thumb" title="查看大图" onClick={() => setZoomed(true)}>
+      <button type="button" className="attachment-thumb" title={t.composer.viewImage} onClick={() => setZoomed(true)}>
         <img src={url} alt={file.name} />
         {file.path === null && <LoaderCircle size={14} className="spin attachment-thumb-busy" />}
       </button>
@@ -350,13 +351,13 @@ function ExtensionPanel({ kind, info, onClose }: { kind: "mcp" | "plugins"; info
     <div className="dialog-backdrop" onClick={onClose}>
       <div className="dialog extension-panel" onClick={(event) => event.stopPropagation()}>
         <h3>
-          <button type="button" className="icon-button small" title="关闭" onClick={onClose}>
+          <button type="button" className="icon-button small" title={t.common.close} onClick={onClose}>
             <ChevronLeft size={16} />
           </button>
-          {kind === "mcp" ? "MCP 服务器" : "插件"}
+          {kind === "mcp" ? t.composer.mcpServers : t.composer.plugins}
         </h3>
         {rows.length === 0 ? (
-          <p className="muted">{kind === "mcp" ? "这个会话没有连接 MCP 服务器。" : "这个会话没有启用插件。"}</p>
+          <p className="muted">{kind === "mcp" ? t.composer.noMcp : t.composer.noPlugins}</p>
         ) : (
           <ul className="extension-list">
             {rows.map((row) => (
@@ -368,13 +369,12 @@ function ExtensionPanel({ kind, info, onClose }: { kind: "mcp" | "plugins"; info
             ))}
           </ul>
         )}
-        <p className="muted extension-note">以 agent 启动时报告的为准。</p>
+        <p className="muted extension-note">{t.composer.extensionNote}</p>
       </div>
     </div>
   );
 }
 
 function statusText(status: string): string {
-  const names: Record<string, string> = { connected: "已连接", failed: "连接失败", pending: "连接中", "needs-auth": "需要授权", disabled: "已停用" };
-  return names[status] ?? status;
+  return t.composer.extensionStatus[status] ?? status;
 }

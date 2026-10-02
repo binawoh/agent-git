@@ -319,6 +319,23 @@ textarea:focus-visible {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+.login-languages {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.login-languages button.link {
+  padding: 4px;
+  font-size: 13px;
+}
+
+.login-languages button.link[aria-current="true"] {
+  color: var(--text);
+  text-decoration: none;
+}
+
 .form-error {
   color: var(--danger);
   font-size: 13.5px;

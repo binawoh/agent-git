@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { options, type Credential } from "../api";
+import { locale, locales, switchLocale, t } from "../i18n";
 import { signIn } from "../store";
 import { BrandMark } from "./Brand";
 
@@ -26,7 +27,7 @@ export function Login() {
       await signIn(credential);
     } catch (reason) {
       const text = reason instanceof Error ? reason.message : String(reason);
-      setError(text === "wrong password" ? "密码不对" : text);
+      setError(text === "wrong password" ? t.login.wrongPassword : text);
     } finally {
       setBusy(false);
     }
@@ -49,30 +50,37 @@ export function Login() {
       <form className="login-card" onSubmit={onSubmit}>
         <BrandMark size={44} />
         <h1>AgentGit Remote</h1>
-        <p className="muted">{mode === "password" ? "输入你设置的登录密码。" : "用 Hub 的个人访问令牌（PAT）登录。"}</p>
+        <p className="muted">{mode === "password" ? t.login.passwordPrompt : t.login.tokenPrompt}</p>
         <input
           key={mode}
           type="password"
           autoComplete={mode === "password" ? "current-password" : "off"}
-          placeholder={mode === "password" ? "密码" : "agsh_pat_…"}
+          placeholder={mode === "password" ? t.login.passwordPlaceholder : "agsh_pat_…"}
           value={value}
           onChange={(event) => setValue(event.target.value)}
           autoFocus
         />
         {error && <div className="form-error">{error}</div>}
         <button type="submit" className="primary" disabled={busy || !value}>
-          {busy ? "登录中…" : "登录"}
+          {busy ? t.login.signingIn : t.login.signIn}
         </button>
         {hasPassword && (
           <button type="button" className="link" onClick={() => switchMode(mode === "password" ? "token" : "password")}>
-            {mode === "password" ? "忘了密码？用访问令牌登录" : "用密码登录"}
+            {mode === "password" ? t.login.useToken : t.login.usePassword}
           </button>
         )}
         {dev && (
           <button type="button" disabled={busy} onClick={() => void submit({ dev: true })}>
-            开发登录（本地测试实例）
+            {t.login.devSignIn}
           </button>
         )}
+        <div className="login-languages">
+          {locales.map((item) => (
+            <button type="button" key={item.id} className="link" lang={item.id} aria-current={item.id === locale} onClick={() => switchLocale(item.id)}>
+              {item.name}
+            </button>
+          ))}
+        </div>
       </form>
     </div>
   );

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { setPassword } from "../api";
+import { t } from "../i18n";
 import { refreshMe, toast, useStore } from "../store";
 
 const MIN_LENGTH = 10;
@@ -16,18 +17,18 @@ export function PasswordDialog({ onClose }: { onClose: () => void }) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if ([...password].length < MIN_LENGTH) return setError(`密码至少 ${MIN_LENGTH} 个字符`);
-    if (password !== confirm) return setError("两次输入的密码不一样");
+    if ([...password].length < MIN_LENGTH) return setError(t.password.tooShort(MIN_LENGTH));
+    if (password !== confirm) return setError(t.password.mismatch);
     setBusy(true);
     setError(null);
     try {
       await setPassword(needsCurrent ? current : null, password);
       await refreshMe();
-      toast("登录密码已设置，其他用旧密码登录的设备已下线", "info");
+      toast(t.password.saved, "info");
       onClose();
     } catch (reason) {
       const text = reason instanceof Error ? reason.message : String(reason);
-      setError(text === "wrong password" ? "当前密码不对" : text);
+      setError(text === "wrong password" ? t.password.wrongCurrent : text);
     } finally {
       setBusy(false);
     }
@@ -36,27 +37,27 @@ export function PasswordDialog({ onClose }: { onClose: () => void }) {
   return (
     <div className="dialog-backdrop" onClick={onClose}>
       <form className="dialog" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === "Escape" && onClose()} onSubmit={submit}>
-        <h3>{me?.password_login ? "修改登录密码" : "设置登录密码"}</h3>
-        <p className="muted">以后在网页上用这个密码登录，不需要再输入令牌。至少 {MIN_LENGTH} 个字符。</p>
+        <h3>{me?.password_login ? t.password.change : t.password.set}</h3>
+        <p className="muted">{t.password.explain(MIN_LENGTH)}</p>
         {needsCurrent && (
-          <input type="password" autoComplete="current-password" placeholder="当前密码" value={current} onChange={(event) => setCurrent(event.target.value)} autoFocus />
+          <input type="password" autoComplete="current-password" placeholder={t.password.current} value={current} onChange={(event) => setCurrent(event.target.value)} autoFocus />
         )}
         <input
           type="password"
           autoComplete="new-password"
-          placeholder="新密码"
+          placeholder={t.password.next}
           value={password}
           onChange={(event) => setNewPassword(event.target.value)}
           autoFocus={!needsCurrent}
         />
-        <input type="password" autoComplete="new-password" placeholder="再输入一次" value={confirm} onChange={(event) => setConfirm(event.target.value)} />
+        <input type="password" autoComplete="new-password" placeholder={t.password.repeat} value={confirm} onChange={(event) => setConfirm(event.target.value)} />
         {error && <div className="form-error">{error}</div>}
         <div className="dialog-actions">
           <button type="button" onClick={onClose}>
-            取消
+            {t.common.cancel}
           </button>
           <button type="submit" className="primary" disabled={busy || !password || !confirm || (needsCurrent && !current)}>
-            {busy ? "保存中…" : "保存"}
+            {busy ? t.common.saving : t.common.save}
           </button>
         </div>
       </form>

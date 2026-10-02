@@ -1,5 +1,6 @@
 import { Folder, FolderPlus, KeyRound, LoaderCircle, Menu, PanelLeftOpen, Plus, SquarePen, WifiOff, X } from "lucide-react";
 import { useState } from "react";
+import { t } from "../i18n";
 import { displayPath, open, projectName, projectOfLocal, setSidebarCollapsed, useStore } from "../store";
 import { BrandMark } from "./Brand";
 import { FolderDialog } from "./FolderDialog";
@@ -47,15 +48,15 @@ function PasswordHint() {
   return (
     <div className="banner hint">
       <KeyRound size={15} />
-      <span className="banner-text">还没有设置登录密码。设置后，以后登录不用再输令牌。</span>
+      <span className="banner-text">{t.shell.passwordHint}</span>
       <button type="button" className="primary small" onClick={() => useStore.setState({ passwordDialog: true })}>
-        设置密码
+        {t.shell.setPassword}
       </button>
       <button
         type="button"
         className="icon-button small"
-        title="暂时不设置"
-        aria-label="暂时不设置"
+        title={t.shell.notNow}
+        aria-label={t.shell.notNow}
         onClick={() => {
           sessionStorage.setItem("agit.passwordHint", "hidden");
           setHidden(true);
@@ -99,21 +100,21 @@ function TopBar() {
       status = session.likely_active ? "readonly" : null;
     }
   } else if (view.type === "new") {
-    title = "新会话";
+    title = t.common.newSession;
     projectId = view.projectId;
   }
   const newSession = () => open({ type: "new", projectId: projectId ?? projects[0]?.project_id ?? null });
   return (
     <header className="topbar">
-      <button type="button" className="icon-button mobile-only" aria-label="打开侧栏" onClick={() => useStore.setState({ sidebarOpen: true })}>
+      <button type="button" className="icon-button mobile-only" aria-label={t.shell.openSidebar} onClick={() => useStore.setState({ sidebarOpen: true })}>
         <Menu size={18} />
       </button>
       {collapsed && (
         <>
-          <button type="button" className="icon-button desktop-only" title="展开侧栏" aria-label="展开侧栏" onClick={() => setSidebarCollapsed(false)}>
+          <button type="button" className="icon-button desktop-only" title={t.shell.expandSidebar} aria-label={t.shell.expandSidebar} onClick={() => setSidebarCollapsed(false)}>
             <PanelLeftOpen size={17} />
           </button>
-          <button type="button" className="icon-button desktop-only" title="新会话" aria-label="新会话" onClick={newSession}>
+          <button type="button" className="icon-button desktop-only" title={t.common.newSession} aria-label={t.common.newSession} onClick={newSession}>
             <SquarePen size={16} />
           </button>
         </>
@@ -138,12 +139,12 @@ function TopBar() {
         {status === "running" && (
           <span className="status-pill running">
             <LoaderCircle size={12} className="spin" />
-            运行中
+            {t.common.running}
           </span>
         )}
-        {status === "awaiting" && <span className="status-pill warn">等待审批</span>}
-        {status === "readonly" && <span className="status-pill">只读</span>}
-        <button type="button" className="icon-button mobile-only" title="新会话" aria-label="新会话" onClick={newSession}>
+        {status === "awaiting" && <span className="status-pill warn">{t.common.awaitingApproval}</span>}
+        {status === "readonly" && <span className="status-pill">{t.common.readOnly}</span>}
+        <button type="button" className="icon-button mobile-only" title={t.common.newSession} aria-label={t.common.newSession} onClick={newSession}>
           <SquarePen size={17} />
         </button>
       </div>
@@ -171,8 +172,8 @@ function ConnectionBanner() {
     </div>
   );
   if (connection !== "open") {
-    if (connectedOnce && disconnectedAt && now - disconnectedAt > 2500) return busy("网络断了一下，正在重新连接…");
-    if (!connectedOnce && now - pageLoadedAt > 4000) return busy("正在连接服务器…");
+    if (connectedOnce && disconnectedAt && now - disconnectedAt > 2500) return busy(t.shell.reconnecting);
+    if (!connectedOnce && now - pageLoadedAt > 4000) return busy(t.shell.connectingServer);
     return null;
   }
   if (devices.length === 0) return null;
@@ -180,15 +181,15 @@ function ConnectionBanner() {
     return (
       <div className="banner warn" title={peerError ?? undefined}>
         <WifiOff size={14} />
-        <span className="banner-text">这台电脑现在连不上：可能关机、休眠、daemon 没在运行（agit rc start），或者网络断了。它一恢复就会自动连上。</span>
+        <span className="banner-text">{t.shell.machineOffline}</span>
       </div>
     );
-  if (peerState === "connecting") return now - pageLoadedAt > 4000 ? busy("正在连接电脑…") : null;
+  if (peerState === "connecting") return now - pageLoadedAt > 4000 ? busy(t.shell.connectingMachine) : null;
   if (peerState === "backoff" || peerState === "rejected" || peerState === "stopped")
     return (
       <div className="banner warn" title={peerError ?? undefined}>
         <LoaderCircle size={14} className="spin" />
-        <span className="banner-text">和电脑的连接中断了，正在重新连接…</span>
+        <span className="banner-text">{t.shell.machineReconnecting}</span>
       </div>
     );
   return null;
@@ -212,8 +213,8 @@ function Home() {
     return (
       <div className="empty">
         <BrandMark size={40} />
-        <h1>还没有电脑连上来</h1>
-        <p className="muted">在要远程控制的电脑上运行下面的命令，这台电脑就会出现在这里：</p>
+        <h1>{t.shell.noMachines}</h1>
+        <p className="muted">{t.shell.noMachinesHint}</p>
         <pre>agit rc start --detach</pre>
       </div>
     );
@@ -223,7 +224,7 @@ function Home() {
     <div className="empty">
       <BrandMark size={40} />
       <h1>{description?.machine?.display_name ?? "AgentGit Remote"}</h1>
-      <p className="muted">{unbound ? "还没有绑定项目文件夹。添加一个电脑上的项目文件夹，就能在里面开始会话。" : "从左侧选一个会话，或者选一个项目开始新会话。"}</p>
+      <p className="muted">{unbound ? t.shell.unbound : t.shell.pickSession}</p>
       {projects.length > 0 && (
         <div className="project-cards">
           {projects.map((project) => (
@@ -241,7 +242,7 @@ function Home() {
       {unbound && (
         <button type="button" className="primary" onClick={() => useStore.setState({ folderDialog: true })}>
           <FolderPlus size={15} />
-          添加文件夹
+          {t.common.addFolder}
         </button>
       )}
     </div>

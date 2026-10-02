@@ -1,5 +1,6 @@
 import { Brain, ClipboardList, FilePen, Hand, ShieldCheck, ShieldOff, Zap } from "lucide-react";
 import type { ReactNode } from "react";
+import { t } from "../i18n";
 import type { EffortChoice, ModelChoice } from "../types";
 import { effortHint, effortName, permissionHint, permissionName } from "./labels";
 import { MenuPicker, type MenuOption } from "./Menu";
@@ -30,14 +31,14 @@ export function ModePicker(props: { value: string; modes: string[]; onChange: (v
     icon: modeIcon(mode),
   }));
   const kept = props.kept ? permissionName[props.kept] ?? props.kept : null;
-  if (props.keep) options.unshift({ value: "", label: kept ? `沿用原权限（${kept}）` : "沿用原权限", description: "保持这个会话原来的权限模式", icon: modeIcon(props.kept ?? "") });
+  if (props.keep) options.unshift({ value: "", label: t.pickers.keepMode(kept), description: t.pickers.keepModeHint, icon: modeIcon(props.kept ?? "") });
   return (
     <MenuPicker
       className={`mode-picker ${(props.value || props.kept) === "bypass" ? "danger" : ""}`}
-      title="权限模式"
+      title={t.pickers.permissionMode}
       icon={modeIcon(props.value || props.kept || "")}
       value={props.value}
-      display={props.keep && !props.value ? kept ?? "原权限" : undefined}
+      display={props.keep && !props.value ? kept ?? t.pickers.keptModeShort : undefined}
       options={options}
       disabled={props.disabled}
       onChange={props.onChange}
@@ -73,7 +74,7 @@ export function ModelPicker(props: {
   return (
     <MenuPicker
       className="model-picker"
-      title={props.loading ? "模型（正在读取列表…）" : "模型"}
+      title={props.loading ? t.pickers.modelLoading : t.pickers.model}
       align="right"
       value={props.value}
       display={props.display}
@@ -89,7 +90,7 @@ export function EffortPicker(props: { value: string; options: MenuOption[]; onCh
   return (
     <MenuPicker
       className="effort-picker"
-      title="思考强度"
+      title={t.pickers.effort}
       icon={<Brain size={15} />}
       align="right"
       value={props.value}

@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight, ChevronsUpDown, FolderPlus, KeyRound, ListFilter, LoaderCircle, LogOut, Monitor, PanelLeftClose, Plus, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
+import { locale, locales, switchLocale, t } from "../i18n";
 import { open, projectName, projectOfLocal, selectDevice, setSidebarCollapsed, signOut, useStore } from "../store";
 import type { LocalSession, Project, SessionInfo } from "../types";
 import { runtimeMark, runtimeName, sessionTitle, statusName } from "./labels";
@@ -90,7 +91,7 @@ export function Sidebar() {
     const other = (byProject.get("") ?? []).sort((a, b) => b.time - a.time);
     if (other.length) result.push({ key: "", project: undefined as unknown as Project, rows: other, latest: other[0].time });
     result.sort((a, b) =>
-      sort === "name" ? (a.project ? projectName(a.project) : "~").localeCompare(b.project ? projectName(b.project) : "~", "zh-CN") : b.latest - a.latest,
+      sort === "name" ? (a.project ? projectName(a.project) : "~").localeCompare(b.project ? projectName(b.project) : "~", locale) : b.latest - a.latest,
     );
     // While searching or filtering, groups without a match are noise.
     return needle || agent !== "all" ? result.filter((group) => group.rows.length > 0) : result;
@@ -103,10 +104,10 @@ export function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-top">
         <DevicePicker />
-        <button type="button" className="sidebar-icon desktop-only" title="收起侧栏" aria-label="收起侧栏" onClick={() => setSidebarCollapsed(true)}>
+        <button type="button" className="sidebar-icon desktop-only" title={t.sidebar.collapse} aria-label={t.sidebar.collapse} onClick={() => setSidebarCollapsed(true)}>
           <PanelLeftClose size={17} />
         </button>
-        <button type="button" className="sidebar-icon mobile-only" title="关闭侧栏" aria-label="关闭侧栏" onClick={() => useStore.setState({ sidebarOpen: false })}>
+        <button type="button" className="sidebar-icon mobile-only" title={t.sidebar.close} aria-label={t.sidebar.close} onClick={() => useStore.setState({ sidebarOpen: false })}>
           <X size={17} />
         </button>
       </div>
@@ -117,17 +118,17 @@ export function Sidebar() {
           onClick={() => open({ type: "new", projectId: groups.find((group) => group.project)?.project.project_id ?? projects[0]?.project_id ?? null })}
         >
           <Plus size={16} />
-          <span>新会话</span>
+          <span>{t.common.newSession}</span>
         </button>
       </div>
       <div className="section-header">
-        <span>项目</span>
+        <span>{t.sidebar.projects}</span>
         <div className="section-actions">
           <button
             type="button"
             className={`icon-button small ${searching ? "active" : ""}`}
-            title="搜索会话"
-            aria-label="搜索会话"
+            title={t.sidebar.searchSessions}
+            aria-label={t.sidebar.searchSessions}
             onClick={() => {
               setSearching(!searching);
               setQuery("");
@@ -138,21 +139,21 @@ export function Sidebar() {
           <ActionMenu
             align="right"
             trigger={(isOpen, toggleMenu) => (
-              <button type="button" className={`icon-button small ${isOpen || filtered ? "active" : ""}`} title="排序和筛选" aria-label="排序和筛选" onClick={toggleMenu}>
+              <button type="button" className={`icon-button small ${isOpen || filtered ? "active" : ""}`} title={t.sidebar.sortAndFilter} aria-label={t.sidebar.sortAndFilter} onClick={toggleMenu}>
                 <ListFilter size={14} />
               </button>
             )}
             items={[
-              { heading: "排序" },
-              { label: "按最近活动", checked: sort === "recent", onSelect: () => setSort("recent") },
-              { label: "按名称", checked: sort === "name", onSelect: () => setSort("name") },
+              { heading: t.sidebar.sort },
+              { label: t.sidebar.byRecent, checked: sort === "recent", onSelect: () => setSort("recent") },
+              { label: t.sidebar.byName, checked: sort === "name", onSelect: () => setSort("name") },
               { heading: "Agent" },
-              { label: "全部", checked: agent === "all", onSelect: () => setAgent("all") },
+              { label: t.sidebar.all, checked: agent === "all", onSelect: () => setAgent("all") },
               { label: "Claude Code", checked: agent === "claude-code", onSelect: () => setAgent("claude-code") },
               { label: "Codex", checked: agent === "codex", onSelect: () => setAgent("codex") },
             ]}
           />
-          <button type="button" className="icon-button small" title="添加文件夹" aria-label="添加文件夹" onClick={() => useStore.setState({ folderDialog: true })}>
+          <button type="button" className="icon-button small" title={t.common.addFolder} aria-label={t.common.addFolder} onClick={() => useStore.setState({ folderDialog: true })}>
             <FolderPlus size={14} />
           </button>
         </div>
@@ -160,9 +161,9 @@ export function Sidebar() {
       {searching && (
         <div className="sidebar-search">
           <Search size={14} />
-          <input autoFocus placeholder="搜索会话标题" value={query} onChange={(event) => setQuery(event.target.value)} />
+          <input autoFocus placeholder={t.sidebar.searchPlaceholder} value={query} onChange={(event) => setQuery(event.target.value)} />
           {query && (
-            <button type="button" className="icon-button small" title="清空" aria-label="清空" onClick={() => setQuery("")}>
+            <button type="button" className="icon-button small" title={t.common.clear} aria-label={t.common.clear} onClick={() => setQuery("")}>
               <X size={13} />
             </button>
           )}
@@ -172,7 +173,7 @@ export function Sidebar() {
         {groups.map(({ key, project, rows }) => (
           <Group key={key || "other"} project={project} rows={rows} selected={selected} now={now} collapsed={!needle && collapsed.has(key)} onToggle={() => toggle(key)} />
         ))}
-        {groups.length === 0 && <div className="group-empty">{needle || agent !== "all" ? "没有匹配的会话" : "还没有项目，点上方的文件夹按钮添加"}</div>}
+        {groups.length === 0 && <div className="group-empty">{needle || agent !== "all" ? t.sidebar.noMatch : t.sidebar.noProjects}</div>}
       </nav>
       <div className="sidebar-footer">
         <ActionMenu
@@ -187,12 +188,15 @@ export function Sidebar() {
           )}
           items={[
             {
-              label: me?.password_login ? "修改登录密码" : "设置登录密码",
+              label: me?.password_login ? t.password.change : t.password.set,
               icon: <KeyRound size={15} />,
               onSelect: () => useStore.setState({ passwordDialog: true }),
             },
             { separator: true },
-            { label: "退出登录", icon: <LogOut size={15} />, danger: true, onSelect: () => void signOut() },
+            { heading: t.sidebar.language },
+            ...locales.map((item) => ({ label: item.name, checked: item.id === locale, onSelect: () => switchLocale(item.id) })),
+            { separator: true },
+            { label: t.sidebar.signOut, icon: <LogOut size={15} />, danger: true, onSelect: () => void signOut() },
           ]}
         />
       </div>
@@ -209,11 +213,11 @@ function Group(props: { project: Project | undefined; rows: Row[]; selected: str
       <div className="group-header">
         <button type="button" className="group-toggle" title={project?.local_path} aria-expanded={!collapsed} onClick={props.onToggle}>
           {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-          <span className="group-name">{project ? projectName(project) : "其他"}</span>
+          <span className="group-name">{project ? projectName(project) : t.sidebar.other}</span>
           {collapsed && rows.length > 0 && <span className="group-count">{rows.length}</span>}
         </button>
         {project && (
-          <button type="button" className="group-add" title="在这个项目里新建会话" aria-label="在这个项目里新建会话" onClick={() => open({ type: "new", projectId: project.project_id })}>
+          <button type="button" className="group-add" title={t.sidebar.newInProject} aria-label={t.sidebar.newInProject} onClick={() => open({ type: "new", projectId: project.project_id })}>
             <Plus size={14} />
           </button>
         )}
@@ -239,10 +243,10 @@ function Group(props: { project: Project | undefined; rows: Row[]; selected: str
           ))}
           {rows.length > PER_GROUP && (
             <button type="button" className="more" onClick={() => setExpanded(!expanded)}>
-              {expanded ? "收起" : `显示全部 ${rows.length} 个`}
+              {expanded ? t.sidebar.showLess : t.sidebar.showAll(rows.length)}
             </button>
           )}
-          {rows.length === 0 && <div className="group-empty">暂无会话</div>}
+          {rows.length === 0 && <div className="group-empty">{t.sidebar.empty}</div>}
         </>
       )}
     </section>
@@ -251,7 +255,7 @@ function Group(props: { project: Project | undefined; rows: Row[]; selected: str
 
 function RowStatus({ status, time, now }: { status: string; time: number; now: number }) {
   if (status === "running") return <LoaderCircle size={13} className="spin row-running" />;
-  if (status === "awaiting_approval") return <span className="row-badge">待审批</span>;
+  if (status === "awaiting_approval") return <span className="row-badge">{t.sidebar.awaitingBadge}</span>;
   return (
     <>
       {status === "elsewhere" && <span className="row-dot" />}
@@ -261,8 +265,8 @@ function RowStatus({ status, time, now }: { status: string; time: number; now: n
 }
 
 function statusText(status: string): string {
-  if (status === "elsewhere") return "正在其他程序中运行";
-  if (status === "stored") return "本机历史会话";
+  if (status === "elsewhere") return t.sidebar.elsewhere;
+  if (status === "stored") return t.sidebar.stored;
   return statusName[status] ?? status;
 }
 
@@ -273,12 +277,12 @@ function DevicePicker() {
   const devicesLoaded = useStore((state) => state.devicesLoaded);
   const current = devices.find((row) => row.device.id === deviceId);
   const state = peerState === "online" ? "online" : current?.online ? "connecting" : "offline";
-  const stateText = state === "online" ? "已连接" : state === "connecting" ? "连接中…" : current ? "离线" : "";
+  const stateText = state === "online" ? t.common.connected : state === "connecting" ? t.common.connecting : current ? t.common.offline : "";
   return (
     <MenuPicker
       className="device-picker"
       placement="bottom"
-      title="电脑"
+      title={t.sidebar.computer}
       icon={
         <span className="device-icon">
           <Monitor size={16} />
@@ -288,7 +292,7 @@ function DevicePicker() {
       value={deviceId ?? ""}
       display={
         <span className="device-label">
-          <span className="device-name">{current?.device.display_name ?? (devicesLoaded ? "没有电脑" : "连接中…")}</span>
+          <span className="device-name">{current?.device.display_name ?? (devicesLoaded ? t.sidebar.noComputer : t.common.connecting)}</span>
           {stateText && <span className="device-state">{stateText}</span>}
         </span>
       }
@@ -296,7 +300,7 @@ function DevicePicker() {
       options={devices.map((row) => ({
         value: row.device.id,
         label: row.device.display_name,
-        description: row.online ? "在线" : "离线",
+        description: row.online ? t.common.online : t.common.offline,
         icon: <span className={`status-dot ${row.online ? "online" : "offline"}`} />,
       }))}
       onChange={(value) => void selectDevice(value)}

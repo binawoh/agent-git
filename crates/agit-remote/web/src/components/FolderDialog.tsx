@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { t } from "../i18n";
 import { bindProject, toast } from "../store";
 
 /** Binds a folder on the machine as a project. */
@@ -15,7 +16,7 @@ export function FolderDialog({ onClose }: { onClose: () => void }) {
     setError(null);
     try {
       await bindProject(value);
-      toast("已添加文件夹", "info");
+      toast(t.folder.added, "info");
       onClose();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -27,11 +28,11 @@ export function FolderDialog({ onClose }: { onClose: () => void }) {
   return (
     <div className="dialog-backdrop" onClick={onClose}>
       <form className="dialog" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === "Escape" && onClose()} onSubmit={submit}>
-        <h3>添加项目文件夹</h3>
-        <p className="muted">填入电脑上的项目文件夹路径，例如 D:\codex\my-project。</p>
+        <h3>{t.folder.title}</h3>
+        <p className="muted">{t.folder.explain}</p>
         <input
           autoFocus
-          placeholder="文件夹路径"
+          placeholder={t.folder.placeholder}
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
@@ -41,10 +42,10 @@ export function FolderDialog({ onClose }: { onClose: () => void }) {
         {error && <div className="form-error">{error}</div>}
         <div className="dialog-actions">
           <button type="button" onClick={onClose}>
-            取消
+            {t.common.cancel}
           </button>
           <button type="submit" className="primary" disabled={busy || !path.trim()}>
-            {busy ? "添加中…" : "添加"}
+            {busy ? t.common.adding : t.common.add}
           </button>
         </div>
       </form>
